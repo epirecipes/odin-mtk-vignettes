@@ -33,6 +33,7 @@ Each vignette has a Julia version (using MTK/Turing) and an R companion (using o
 | 04 | [Age-Structured SIR](vignettes/04_arrays/04_arrays.md) | Vector state variables in ModelingToolkit.jl |
 | 05 | [Particle Filter and Likelihood](vignettes/05_particle_filter/05_particle_filter.md) | Bootstrap particle filter from scratch |
 | 06 | [Bayesian Inference with MCMC](vignettes/06_inference/06_inference.md) | ODE + Turing.jl NUTS for full posterior inference |
+| 07 | [Fast Inference with Symbolic Sensitivities](vignettes/07_fast_inference/07_fast_inference.md) | ~110× speedup via symbolic sensitivity equations + codegen |
 
 ## Getting Started
 

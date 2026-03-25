@@ -7,6 +7,8 @@ format:
     code-fold: false
   gfm:
     toc: true
+  pdf:
+    toc: true
 engine: julia
 julia:
   project: ".."
@@ -16,11 +18,9 @@ julia:
 
 This vignette demonstrates a complete Bayesian inference pipeline using [Turing.jl](https://turinglang.org/) with an ODE model defined via [ModelingToolkit.jl](https://docs.sciml.ai/ModelingToolkit/stable/). This mirrors the R odin2/dust2/monty workflow: define a model, generate synthetic data, specify priors, run MCMC, and analyse posteriors.
 
-For a deterministic ODE model with Poisson observations, Turing.jl can embed the ODE solver directly inside the `@model`, letting the NUTS sampler explore the parameter space efficiently.
+The R companion (in `R/`) uses the same model, data, and priors but with odin2/dust2/monty (stochastic model + particle filter + random walk MCMC).
 
-## Model and Data
-
-First, define the deterministic SIR model and generate synthetic observations.
+## Model Definition
 
 ```{julia}
 using ModelingToolkit
@@ -31,6 +31,7 @@ using Distributions
 using CairoMakie
 using Random
 using Statistics
+using Logging
 
 @parameters β=0.5 γ=0.1 N_pop=1000.0
 @variables S(t)=990.0 I(t)=10.0 R(t)=0.0
@@ -47,7 +48,7 @@ sir = structural_simplify(sir)
 
 ## Generate Synthetic Data
 
-We simulate the deterministic model and add Poisson noise to the daily incidence.
+We simulate the deterministic SIR and add Poisson noise to the daily incidence (ΔR).
 
 ```{julia}
 prob_true = ODEProblem(sir, [], (0.0, 50.0), [sir.β => 0.5, sir.γ => 0.1])
@@ -58,23 +59,23 @@ daily_incidence = max.(diff(R_vals), 1e-6)
 
 Random.seed!(1)
 observed = [rand(Poisson(λ)) for λ in daily_incidence]
-data_times = sol_true.t[2:end]
+data_times = collect(sol_true.t[2:end])
+
 println("Observed cases (first 10): ", observed[1:10])
+println("Total observed: ", sum(observed))
 ```
 
 ## Set Up Inference
 
-The Turing model embeds the ODE solver. For each proposed `(β, γ)`, we solve the ODE, compute daily incidence, and evaluate the Poisson likelihood.
+Priors: β ~ Gamma(shape=2, rate=4), γ ~ Gamma(shape=2, rate=20). These are identical to the R monty_dsl priors.
 
 ```{julia}
-sir_sys = sir  # capture for use in model closure
+sir_sys = sir
 
 @model function sir_inference(observed, data_times)
-    # Priors (matching R monty_dsl: Gamma with shape, scale parameterisation)
-    β_est ~ Gamma(2, 1/4)      # shape=2, scale=1/4 → mean=0.5
-    γ_est ~ Gamma(2, 1/20)     # shape=2, scale=1/20 → mean=0.1
+    β_est ~ Gamma(2, 1/4)      # shape=2, scale=1/4 (rate=4) → mean=0.5
+    γ_est ~ Gamma(2, 1/20)     # shape=2, scale=1/20 (rate=20) → mean=0.1
 
-    # Solve ODE
     prob = ODEProblem(sir_sys, [], (0.0, maximum(data_times)),
                       [sir_sys.β => β_est, sir_sys.γ => γ_est])
     sol = solve(prob, Tsit5(); saveat=data_times)
@@ -84,10 +85,8 @@ sir_sys = sir  # capture for use in model closure
         return
     end
 
-    # Daily incidence from ΔR
     R_vals = sol[sir_sys.R]
     R_at_0 = 0.0
-
     for i in eachindex(observed)
         R_prev = i == 1 ? R_at_0 : R_vals[i - 1]
         λ = max(R_vals[i] - R_prev, 1e-6)
@@ -95,46 +94,53 @@ sir_sys = sir  # capture for use in model closure
     end
 end
 
-model = sir_inference(observed, collect(data_times))
+model = sir_inference(observed, data_times)
 ```
 
 ## Run MCMC
 
-We use the NUTS sampler — Turing.jl's default gradient-based sampler — which is more efficient than the random walk used in R monty.
+We use the NUTS sampler (2000 iterations, 1000 warmup).
 
 ```{julia}
 #| output: false
-using Logging
-chain = with_logger(NullLogger()) do
-    sample(model, NUTS(), 2000; progress=false)
+timing = @timed begin
+    chain = with_logger(NullLogger()) do
+        sample(model, NUTS(), 2000; progress=false)
+    end
 end
-println("Sampling complete: $(length(chain)) iterations")
+elapsed = timing.time
+println("Sampling complete: 2000 iterations in ", round(elapsed; digits=2), "s")
 ```
 
 ## Results
 
 ```{julia}
-β_samples = chain[:β_est][501:end]
-γ_samples = chain[:γ_est][501:end]
+burnin = 500
+β_samples = vec(chain[:β_est])[burnin+1:end]
+γ_samples = vec(chain[:γ_est])[burnin+1:end]
 
 println("β: mean = ", round(mean(β_samples); digits=3),
-        ", 95% CI = [", round(quantile(vec(β_samples), 0.025); digits=3),
-        ", ", round(quantile(vec(β_samples), 0.975); digits=3), "]")
+        ", 95% CI = [", round(quantile(β_samples, 0.025); digits=3),
+        ", ", round(quantile(β_samples, 0.975); digits=3), "]")
 println("γ: mean = ", round(mean(γ_samples); digits=3),
-        ", 95% CI = [", round(quantile(vec(γ_samples), 0.025); digits=3),
-        ", ", round(quantile(vec(γ_samples), 0.975); digits=3), "]")
+        ", 95% CI = [", round(quantile(γ_samples, 0.025); digits=3),
+        ", ", round(quantile(γ_samples, 0.975); digits=3), "]")
 println("True: β = 0.5, γ = 0.1")
 ```
+
+## Posterior Histograms
 
 ```{julia}
 fig = Figure(size=(700, 350))
 ax1 = Axis(fig[1, 1]; xlabel="β", ylabel="Density", title="Posterior: β")
-hist!(ax1, vec(β_samples); bins=30, normalization=:pdf, color=(:steelblue, 0.7))
-vlines!(ax1, [0.5]; color=:red, linewidth=2)
+hist!(ax1, β_samples; bins=30, normalization=:pdf, color=(:steelblue, 0.7))
+vlines!(ax1, [0.5]; color=:red, linewidth=2, label="True")
+axislegend(ax1; position=:rt)
 
 ax2 = Axis(fig[1, 2]; xlabel="γ", ylabel="Density", title="Posterior: γ")
-hist!(ax2, vec(γ_samples); bins=30, normalization=:pdf, color=(:steelblue, 0.7))
-vlines!(ax2, [0.1]; color=:red, linewidth=2)
+hist!(ax2, γ_samples; bins=30, normalization=:pdf, color=(:steelblue, 0.7))
+vlines!(ax2, [0.1]; color=:red, linewidth=2, label="True")
+axislegend(ax2; position=:rt)
 fig
 ```
 
@@ -143,11 +149,46 @@ fig
 ```{julia}
 fig2 = Figure(size=(700, 400))
 ax1 = Axis(fig2[1, 1]; xlabel="Iteration", ylabel="β", title="Trace: β")
-lines!(ax1, collect(1:length(vec(β_samples))), vec(β_samples); color=:steelblue, linewidth=0.5)
+lines!(ax1, 1:length(β_samples), β_samples; color=:steelblue, linewidth=0.5)
 hlines!(ax1, [0.5]; color=:red, linewidth=2)
 
 ax2 = Axis(fig2[2, 1]; xlabel="Iteration", ylabel="γ", title="Trace: γ")
-lines!(ax2, collect(1:length(vec(γ_samples))), vec(γ_samples); color=:steelblue, linewidth=0.5)
+lines!(ax2, 1:length(γ_samples), γ_samples; color=:steelblue, linewidth=0.5)
 hlines!(ax2, [0.1]; color=:red, linewidth=2)
 fig2
+```
+
+## Effective Sample Size
+
+```{julia}
+function ess_simple(x)
+    n = length(x)
+    max_lag = min(n - 1, 1000)
+    μ = mean(x)
+    var0 = sum((x .- μ).^2) / n
+    var0 == 0 && return Float64(n)
+    ρ = zeros(max_lag)
+    for k in 1:max_lag
+        ρ[k] = sum((x[1:n-k] .- μ) .* (x[k+1:n] .- μ)) / (n * var0)
+    end
+    tau = 1.0
+    for k in 1:2:max_lag-1
+        pair = ρ[k] + ρ[k+1]
+        pair < 0 && break
+        tau += 2 * pair
+    end
+    return n / tau
+end
+
+ess_β = ess_simple(β_samples)
+ess_γ = ess_simple(γ_samples)
+
+println("── Performance ──")
+println("Sampler:    NUTS (Turing.jl)")
+println("Iterations: 2000 (burn-in: ", burnin, ")")
+println("Time:       ", round(elapsed; digits=2), " s")
+println("ESS (β):    ", round(ess_β; digits=1))
+println("ESS (γ):    ", round(ess_γ; digits=1))
+println("ESS/s (β):  ", round(ess_β / elapsed; digits=1))
+println("ESS/s (γ):  ", round(ess_γ / elapsed; digits=1))
 ```

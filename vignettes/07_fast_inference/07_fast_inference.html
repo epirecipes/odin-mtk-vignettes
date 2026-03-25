@@ -1,0 +1,1050 @@
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en" xml:lang="en"><head>
+
+<meta charset="utf-8">
+<meta name="generator" content="quarto-1.9.28">
+
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
+
+
+<title>Fast Bayesian Inference with Symbolic Sensitivities</title>
+<style>
+/* Default styles provided by pandoc.
+** See https://pandoc.org/MANUAL.html#variables-for-html for config info.
+*/
+code{white-space: pre-wrap;}
+span.smallcaps{font-variant: small-caps;}
+div.columns{display: flex; gap: min(4vw, 1.5em);}
+div.column{flex: auto; overflow-x: auto;}
+div.hanging-indent{margin-left: 1.5em; text-indent: -1.5em;}
+ul.task-list{list-style: none;}
+ul.task-list li input[type="checkbox"] {
+  width: 0.8em;
+  margin: 0 0.8em 0.2em -1em; /* quarto-specific, see https://github.com/quarto-dev/quarto-cli/issues/4556 */ 
+  vertical-align: middle;
+}
+/* CSS for syntax highlighting */
+html { -webkit-text-size-adjust: 100%; }
+pre > code.sourceCode { white-space: pre; position: relative; }
+pre > code.sourceCode > span { display: inline-block; line-height: 1.25; }
+pre > code.sourceCode > span:empty { height: 1.2em; }
+.sourceCode { overflow: visible; }
+code.sourceCode > span { color: inherit; text-decoration: inherit; }
+div.sourceCode { margin: 1em 0; }
+pre.sourceCode { margin: 0; }
+@media screen {
+div.sourceCode { overflow: auto; }
+}
+@media print {
+pre > code.sourceCode { white-space: pre-wrap; }
+pre > code.sourceCode > span { text-indent: -5em; padding-left: 5em; }
+}
+pre.numberSource code
+  { counter-reset: source-line 0; }
+pre.numberSource code > span
+  { position: relative; left: -4em; counter-increment: source-line; }
+pre.numberSource code > span > a:first-child::before
+  { content: counter(source-line);
+    position: relative; left: -1em; text-align: right; vertical-align: baseline;
+    border: none; display: inline-block;
+    -webkit-touch-callout: none; -webkit-user-select: none;
+    -khtml-user-select: none; -moz-user-select: none;
+    -ms-user-select: none; user-select: none;
+    padding: 0 4px; width: 4em;
+  }
+pre.numberSource { margin-left: 3em;  padding-left: 4px; }
+div.sourceCode
+  {   }
+@media screen {
+pre > code.sourceCode > span > a:first-child::before { text-decoration: underline; }
+}
+</style>
+
+
+<script src="https://cdn.jsdelivr.net/npm/jquery@3.5.1/dist/jquery.min.js" integrity="sha384-ZvpUoO/+PpLXR1lu4jmpXWu80pZlYUAfxl5NsBMWOEPSjUn/6Z/hRTt8+pR6L4N2" crossorigin="anonymous"></script><script src="07_fast_inference_files/libs/clipboard/clipboard.min.js"></script>
+<script src="07_fast_inference_files/libs/quarto-html/quarto.js" type="module"></script>
+<script src="07_fast_inference_files/libs/quarto-html/tabsets/tabsets.js" type="module"></script>
+<script src="07_fast_inference_files/libs/quarto-html/popper.min.js"></script>
+<script src="07_fast_inference_files/libs/quarto-html/tippy.umd.min.js"></script>
+<script src="07_fast_inference_files/libs/quarto-html/anchor.min.js"></script>
+<link href="07_fast_inference_files/libs/quarto-html/tippy.css" rel="stylesheet">
+<link href="07_fast_inference_files/libs/quarto-html/quarto-syntax-highlighting-49e51e44f424ea8c7044b429bdbbbfe2.css" rel="stylesheet" id="quarto-text-highlighting-styles">
+<script src="07_fast_inference_files/libs/bootstrap/bootstrap.min.js"></script>
+<link href="07_fast_inference_files/libs/bootstrap/bootstrap-icons.css" rel="stylesheet">
+<link href="07_fast_inference_files/libs/bootstrap/bootstrap-8ffd5f67044e5306d9846f29df41dda5.min.css" rel="stylesheet" append-hash="true" id="quarto-bootstrap" data-mode="light">
+<script src="https://cdn.jsdelivr.net/npm/requirejs@2.3.6/require.min.js" integrity="sha384-c9c+LnTbwQ3aujuU7ULEPVvgLs+Fn6fJUvIGTsuu1ZcCf11fiEubah0ttpca4ntM sha384-6V1/AdqZRWk1KAlWbKBlGhN7VG4iE/yAZcO6NZPMF8od0vukrvr0tg4qY6NSrItx" crossorigin="anonymous"></script>
+
+<script type="application/javascript">define('jquery', [],function() {return window.jQuery;})</script>
+
+  <script src="https://cdnjs.cloudflare.com/polyfill/v3/polyfill.min.js?features=es6"></script>
+  <script defer="" src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-chtml-full.js" type="text/javascript"></script>
+
+<script type="text/javascript">
+const typesetMath = (el) => {
+  if (window.MathJax) {
+    // MathJax Typeset
+    window.MathJax.typeset([el]);
+  } else if (window.katex) {
+    // KaTeX Render
+    var mathElements = el.getElementsByClassName("math");
+    var macros = [];
+    for (var i = 0; i < mathElements.length; i++) {
+      var texText = mathElements[i].firstChild;
+      if (mathElements[i].tagName == "SPAN" && texText && texText.data) {
+        window.katex.render(texText.data, mathElements[i], {
+          displayMode: mathElements[i].classList.contains('display'),
+          throwOnError: false,
+          macros: macros,
+          fleqn: false
+        });
+      }
+    }
+  }
+}
+window.Quarto = {
+  typesetMath
+};
+</script>
+
+</head>
+
+<body class="quarto-light">
+
+<div id="quarto-content" class="page-columns page-rows-contents page-layout-article">
+<div id="quarto-margin-sidebar" class="sidebar margin-sidebar">
+  <nav id="TOC" role="doc-toc" class="toc-active">
+    <h2 id="toc-title">Table of contents</h2>
+   
+  <ul>
+  <li><a href="#overview" id="toc-overview" class="nav-link active" data-scroll-target="#overview">Overview</a></li>
+  <li><a href="#model-and-data" id="toc-model-and-data" class="nav-link" data-scroll-target="#model-and-data">Model and Data</a>
+  <ul class="collapse">
+  <li><a href="#ess-helper" id="toc-ess-helper" class="nav-link" data-scroll-target="#ess-helper">ESS Helper</a></li>
+  </ul></li>
+  <li><a href="#approach-1-turing.jl-forwarddiff-baseline" id="toc-approach-1-turing.jl-forwarddiff-baseline" class="nav-link" data-scroll-target="#approach-1-turing.jl-forwarddiff-baseline">Approach 1: Turing.jl + ForwardDiff (Baseline)</a></li>
+  <li><a href="#approach-2-symbolic-sensitivity-equations" id="toc-approach-2-symbolic-sensitivity-equations" class="nav-link" data-scroll-target="#approach-2-symbolic-sensitivity-equations">Approach 2: Symbolic Sensitivity Equations</a>
+  <ul class="collapse">
+  <li><a href="#deriving-the-augmented-system" id="toc-deriving-the-augmented-system" class="nav-link" data-scroll-target="#deriving-the-augmented-system">Deriving the Augmented System</a></li>
+  <li><a href="#building-the-augmented-ode" id="toc-building-the-augmented-ode" class="nav-link" data-scroll-target="#building-the-augmented-ode">Building the Augmented ODE</a></li>
+  <li><a href="#using-odefunction-codegen" id="toc-using-odefunction-codegen" class="nav-link" data-scroll-target="#using-odefunction-codegen">Using ODEFunction Codegen</a></li>
+  <li><a href="#analytic-gradient-computation" id="toc-analytic-gradient-computation" class="nav-link" data-scroll-target="#analytic-gradient-computation">Analytic Gradient Computation</a></li>
+  <li><a href="#gradient-verification" id="toc-gradient-verification" class="nav-link" data-scroll-target="#gradient-verification">Gradient Verification</a></li>
+  <li><a href="#nuts-sampling" id="toc-nuts-sampling" class="nav-link" data-scroll-target="#nuts-sampling">NUTS Sampling</a></li>
+  </ul></li>
+  <li><a href="#comparison" id="toc-comparison" class="nav-link" data-scroll-target="#comparison">Comparison</a></li>
+  <li><a href="#performance-summary" id="toc-performance-summary" class="nav-link" data-scroll-target="#performance-summary">Performance Summary</a></li>
+  <li><a href="#where-does-the-speedup-come-from" id="toc-where-does-the-speedup-come-from" class="nav-link" data-scroll-target="#where-does-the-speedup-come-from">Where Does the Speedup Come From?</a>
+  <ul class="collapse">
+  <li><a href="#key-insight" id="toc-key-insight" class="nav-link" data-scroll-target="#key-insight">Key Insight</a></li>
+  </ul></li>
+  </ul>
+<div class="quarto-alternate-formats"><h2>Other Formats</h2><ul><li><a href="07_fast_inference.md"><i class="bi bi-file-code"></i>Github (GFM)</a></li><li><a href="07_fast_inference.pdf"><i class="bi bi-file-pdf"></i>PDF</a></li></ul></div></nav>
+</div>
+<main class="content" id="quarto-document-content">
+
+<header id="title-block-header" class="quarto-title-block default">
+<div class="quarto-title">
+<h1 class="title">Fast Bayesian Inference with Symbolic Sensitivities</h1>
+<p class="subtitle lead">From 171s to 1.5s: Eliminating AD and Framework Overhead</p>
+</div>
+
+
+
+<div class="quarto-title-meta">
+
+    
+  
+    
+  </div>
+  
+
+
+</header>
+
+
+<section id="overview" class="level2">
+<h2 class="anchored" data-anchor-id="overview">Overview</h2>
+<p>Vignette 06 showed Bayesian inference using Turing.jl’s NUTS sampler with ModelingToolkit.jl ODE models. While correct, the naive approach is slow (~170s for 2000 iterations) because:</p>
+<ol type="1">
+<li><strong>Automatic differentiation through the ODE solver</strong> (~65ms per gradient)</li>
+<li><strong>MTK’s symbolic <code>remake</code> overhead</strong> (~100ms per parameter update)</li>
+<li><strong>Turing’s model infrastructure overhead</strong> (~25% of total)</li>
+</ol>
+<p>This vignette demonstrates three progressively faster approaches, culminating in a <strong>~110× speedup</strong> by combining:</p>
+<ul>
+<li><strong>Symbolic sensitivity equations</strong> (no AD at runtime)</li>
+<li><strong>MTK’s <code>ODEFunction</code> codegen</strong> (compiled parameter handling)</li>
+<li><strong>AdvancedHMC.jl via LogDensityProblems</strong> (minimal sampler overhead)</li>
+</ul>
+<div id="2" class="cell" data-execution_count="1">
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb1"><pre class="sourceCode julia code-with-copy"><code class="sourceCode julia"><span id="cb1-1"><a href="#cb1-1" aria-hidden="true" tabindex="-1"></a><span class="im">using</span> <span class="bu">ModelingToolkit</span></span>
+<span id="cb1-2"><a href="#cb1-2" aria-hidden="true" tabindex="-1"></a><span class="im">using</span> <span class="bu">ModelingToolkit</span>: t_nounits as t, D_nounits as D</span>
+<span id="cb1-3"><a href="#cb1-3" aria-hidden="true" tabindex="-1"></a><span class="im">using</span> <span class="bu">Symbolics</span></span>
+<span id="cb1-4"><a href="#cb1-4" aria-hidden="true" tabindex="-1"></a><span class="im">using</span> <span class="bu">DifferentialEquations</span></span>
+<span id="cb1-5"><a href="#cb1-5" aria-hidden="true" tabindex="-1"></a><span class="im">using</span> <span class="bu">SciMLSensitivity</span></span>
+<span id="cb1-6"><a href="#cb1-6" aria-hidden="true" tabindex="-1"></a><span class="im">using</span> <span class="bu">Distributions</span></span>
+<span id="cb1-7"><a href="#cb1-7" aria-hidden="true" tabindex="-1"></a><span class="im">using</span> <span class="bu">Random</span></span>
+<span id="cb1-8"><a href="#cb1-8" aria-hidden="true" tabindex="-1"></a><span class="im">using</span> <span class="bu">Statistics</span></span>
+<span id="cb1-9"><a href="#cb1-9" aria-hidden="true" tabindex="-1"></a><span class="im">using</span> <span class="bu">LogDensityProblems</span>, <span class="bu">LogDensityProblemsAD</span></span>
+<span id="cb1-10"><a href="#cb1-10" aria-hidden="true" tabindex="-1"></a><span class="im">import</span> <span class="bu">AdvancedHMC</span></span>
+<span id="cb1-11"><a href="#cb1-11" aria-hidden="true" tabindex="-1"></a><span class="im">import</span> <span class="bu">Turing</span></span>
+<span id="cb1-12"><a href="#cb1-12" aria-hidden="true" tabindex="-1"></a><span class="im">using</span> <span class="bu">Logging</span></span>
+<span id="cb1-13"><a href="#cb1-13" aria-hidden="true" tabindex="-1"></a><span class="im">using</span> <span class="bu">CairoMakie</span></span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+</div>
+</section>
+<section id="model-and-data" class="level2">
+<h2 class="anchored" data-anchor-id="model-and-data">Model and Data</h2>
+<p>We use the same SIR model and synthetic data as vignette 06.</p>
+<div id="4" class="cell" data-execution_count="1">
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb2"><pre class="sourceCode julia code-with-copy"><code class="sourceCode julia"><span id="cb2-1"><a href="#cb2-1" aria-hidden="true" tabindex="-1"></a><span class="pp">@parameters</span> β<span class="op">=</span><span class="fl">0.5</span> γ<span class="op">=</span><span class="fl">0.1</span> N_pop<span class="op">=</span><span class="fl">1000.0</span></span>
+<span id="cb2-2"><a href="#cb2-2" aria-hidden="true" tabindex="-1"></a><span class="pp">@variables</span> <span class="fu">S</span>(t)<span class="op">=</span><span class="fl">990.0</span> <span class="fu">I</span>(t)<span class="op">=</span><span class="fl">10.0</span> <span class="fu">R</span>(t)<span class="op">=</span><span class="fl">0.0</span></span>
+<span id="cb2-3"><a href="#cb2-3" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb2-4"><a href="#cb2-4" aria-hidden="true" tabindex="-1"></a>eqs <span class="op">=</span> [</span>
+<span id="cb2-5"><a href="#cb2-5" aria-hidden="true" tabindex="-1"></a>    <span class="fu">D</span>(S) <span class="op">~</span> <span class="op">-</span>β <span class="op">*</span> S <span class="op">*</span> I <span class="op">/</span> N_pop,</span>
+<span id="cb2-6"><a href="#cb2-6" aria-hidden="true" tabindex="-1"></a>    <span class="fu">D</span>(I) <span class="op">~</span>  β <span class="op">*</span> S <span class="op">*</span> I <span class="op">/</span> N_pop <span class="op">-</span> γ <span class="op">*</span> I,</span>
+<span id="cb2-7"><a href="#cb2-7" aria-hidden="true" tabindex="-1"></a>    <span class="fu">D</span>(R) <span class="op">~</span>  γ <span class="op">*</span> I</span>
+<span id="cb2-8"><a href="#cb2-8" aria-hidden="true" tabindex="-1"></a>]</span>
+<span id="cb2-9"><a href="#cb2-9" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb2-10"><a href="#cb2-10" aria-hidden="true" tabindex="-1"></a><span class="pp">@named</span> sir <span class="op">=</span> <span class="fu">ODESystem</span>(eqs, t)</span>
+<span id="cb2-11"><a href="#cb2-11" aria-hidden="true" tabindex="-1"></a>sir_s <span class="op">=</span> <span class="fu">structural_simplify</span>(sir)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="cell-output cell-output-display" data-execution_count="1">
+<div class="ansi-escaped-output">
+<pre><span class="ansi-bold">Model sir:</span>
+<span class="ansi-bold">Equations (3):</span>
+  3 standard: see equations(sir)
+<span class="ansi-bold">Unknowns (3):</span> see unknowns(sir)
+  R(t)
+  I(t)
+  S(t)
+<span class="ansi-bold">Parameters (3):</span> see parameters(sir)
+  β
+  N_pop
+  γ</pre>
+</div>
+</div>
+</div>
+<div id="6" class="cell" data-execution_count="1">
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb3"><pre class="sourceCode julia code-with-copy"><code class="sourceCode julia"><span id="cb3-1"><a href="#cb3-1" aria-hidden="true" tabindex="-1"></a>prob_base <span class="op">=</span> <span class="fu">ODEProblem</span>(sir_s, [], (<span class="fl">0.0</span>, <span class="fl">50.0</span>),</span>
+<span id="cb3-2"><a href="#cb3-2" aria-hidden="true" tabindex="-1"></a>    [sir_s.β <span class="op">=&gt;</span> <span class="fl">0.5</span>, sir_s.γ <span class="op">=&gt;</span> <span class="fl">0.1</span>]; jac<span class="op">=</span><span class="cn">true</span>)</span>
+<span id="cb3-3"><a href="#cb3-3" aria-hidden="true" tabindex="-1"></a>sol_true <span class="op">=</span> <span class="fu">solve</span>(prob_base, <span class="fu">Tsit5</span>(); saveat<span class="op">=</span><span class="fl">1.0</span>)</span>
+<span id="cb3-4"><a href="#cb3-4" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb3-5"><a href="#cb3-5" aria-hidden="true" tabindex="-1"></a><span class="bu">Random</span>.<span class="fu">seed!</span>(<span class="fl">1</span>)</span>
+<span id="cb3-6"><a href="#cb3-6" aria-hidden="true" tabindex="-1"></a>I_true <span class="op">=</span> sol_true[sir_s.I]</span>
+<span id="cb3-7"><a href="#cb3-7" aria-hidden="true" tabindex="-1"></a>obs <span class="op">=</span> [<span class="fu">rand</span>(<span class="fu">Poisson</span>(<span class="fu">max</span>(v, <span class="fl">1e-6</span>))) for v <span class="kw">in</span> I_true[<span class="fl">2</span><span class="op">:</span><span class="kw">end</span>]]</span>
+<span id="cb3-8"><a href="#cb3-8" aria-hidden="true" tabindex="-1"></a>data_times <span class="op">=</span> <span class="fu">collect</span>(<span class="fl">1.0</span><span class="op">:</span><span class="fl">1.0</span><span class="op">:</span><span class="fl">50.0</span>)</span>
+<span id="cb3-9"><a href="#cb3-9" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb3-10"><a href="#cb3-10" aria-hidden="true" tabindex="-1"></a><span class="fu">println</span>(<span class="st">"Generated </span><span class="sc">$</span>(<span class="fu">length</span>(obs))<span class="st"> observations, range: </span><span class="sc">$</span>(<span class="fu">extrema</span>(obs))<span class="st">"</span>)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="cell-output cell-output-stdout">
+<div class="ansi-escaped-output">
+<pre><span class="ansi-yellow-fg ansi-bold">┌ </span><span class="ansi-yellow-fg ansi-bold">Warning: </span>`SciMLBase.ODEProblem(sys, u0, tspan, p; kw...)` is deprecated. Use
+<span class="ansi-yellow-fg ansi-bold">│ </span>`SciMLBase.ODEProblem(sys, merge(if isempty(u0)
+<span class="ansi-yellow-fg ansi-bold">│ </span>    Dict()
+<span class="ansi-yellow-fg ansi-bold">│ </span>else
+<span class="ansi-yellow-fg ansi-bold">│ </span>    Dict(unknowns(sys) .=&gt; u0)
+<span class="ansi-yellow-fg ansi-bold">│ </span>end, Dict(p)), tspan)` instead.
+<span class="ansi-yellow-fg ansi-bold">└ </span><span class="ansi-bright-black-fg">@ ModelingToolkitBase ~/.julia/packages/ModelingToolkitBase/uIKoY/src/deprecations.jl:53</span>
+Generated 50 observations, range: (14, 483)
+</pre>
+</div>
+</div>
+</div>
+<section id="ess-helper" class="level3">
+<h3 class="anchored" data-anchor-id="ess-helper">ESS Helper</h3>
+<p>We use the same Geyer initial positive sequence estimator for ESS throughout.</p>
+<div id="8" class="cell" data-execution_count="1">
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb4"><pre class="sourceCode julia code-with-copy"><code class="sourceCode julia"><span id="cb4-1"><a href="#cb4-1" aria-hidden="true" tabindex="-1"></a><span class="kw">function</span> <span class="fu">ess_ipse</span>(x)</span>
+<span id="cb4-2"><a href="#cb4-2" aria-hidden="true" tabindex="-1"></a>    n <span class="op">=</span> <span class="fu">length</span>(x)</span>
+<span id="cb4-3"><a href="#cb4-3" aria-hidden="true" tabindex="-1"></a>    mu <span class="op">=</span> <span class="fu">mean</span>(x)</span>
+<span id="cb4-4"><a href="#cb4-4" aria-hidden="true" tabindex="-1"></a>    var0 <span class="op">=</span> <span class="fu">sum</span>((x <span class="op">.-</span> mu)<span class="op">.^</span><span class="fl">2</span>) <span class="op">/</span> n</span>
+<span id="cb4-5"><a href="#cb4-5" aria-hidden="true" tabindex="-1"></a>    var0 <span class="op">==</span> <span class="fl">0</span> <span class="op">&amp;&amp;</span> <span class="cf">return</span> <span class="fu">Float64</span>(n)</span>
+<span id="cb4-6"><a href="#cb4-6" aria-hidden="true" tabindex="-1"></a>    max_lag <span class="op">=</span> <span class="fu">min</span>(n <span class="op">-</span> <span class="fl">1</span>, <span class="fl">1000</span>)</span>
+<span id="cb4-7"><a href="#cb4-7" aria-hidden="true" tabindex="-1"></a>    rho <span class="op">=</span> [<span class="fu">sum</span>((x[<span class="fl">1</span><span class="op">:</span>n<span class="op">-</span>k] <span class="op">.-</span> mu) <span class="op">.*</span> (x[k<span class="op">+</span><span class="fl">1</span><span class="op">:</span>n] <span class="op">.-</span> mu)) <span class="op">/</span> (n <span class="op">*</span> var0)</span>
+<span id="cb4-8"><a href="#cb4-8" aria-hidden="true" tabindex="-1"></a>           for k <span class="kw">in</span> <span class="fl">1</span><span class="op">:</span>max_lag]</span>
+<span id="cb4-9"><a href="#cb4-9" aria-hidden="true" tabindex="-1"></a>    tau <span class="op">=</span> <span class="fl">1.0</span></span>
+<span id="cb4-10"><a href="#cb4-10" aria-hidden="true" tabindex="-1"></a>    <span class="cf">for</span> k <span class="kw">in</span> <span class="fl">1</span><span class="op">:</span><span class="fl">2</span><span class="op">:</span>max_lag<span class="op">-</span><span class="fl">1</span></span>
+<span id="cb4-11"><a href="#cb4-11" aria-hidden="true" tabindex="-1"></a>        pair_sum <span class="op">=</span> rho[k] <span class="op">+</span> rho[k<span class="op">+</span><span class="fl">1</span>]</span>
+<span id="cb4-12"><a href="#cb4-12" aria-hidden="true" tabindex="-1"></a>        pair_sum <span class="op">&lt;</span> <span class="fl">0</span> <span class="op">&amp;&amp;</span> <span class="cf">break</span></span>
+<span id="cb4-13"><a href="#cb4-13" aria-hidden="true" tabindex="-1"></a>        tau <span class="op">+=</span> <span class="fl">2</span> <span class="op">*</span> pair_sum</span>
+<span id="cb4-14"><a href="#cb4-14" aria-hidden="true" tabindex="-1"></a>    <span class="cf">end</span></span>
+<span id="cb4-15"><a href="#cb4-15" aria-hidden="true" tabindex="-1"></a>    <span class="cf">return</span> n <span class="op">/</span> tau</span>
+<span id="cb4-16"><a href="#cb4-16" aria-hidden="true" tabindex="-1"></a><span class="kw">end</span></span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="cell-output cell-output-display" data-execution_count="1">
+<pre><code>ess_ipse (generic function with 1 method)</code></pre>
+</div>
+</div>
+</section>
+</section>
+<section id="approach-1-turing.jl-forwarddiff-baseline" class="level2">
+<h2 class="anchored" data-anchor-id="approach-1-turing.jl-forwarddiff-baseline">Approach 1: Turing.jl + ForwardDiff (Baseline)</h2>
+<p>The standard approach: define a <code>@model</code>, let Turing differentiate through the ODE solve with ForwardDiff.</p>
+<div id="10" class="cell" data-execution_count="1">
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb6"><pre class="sourceCode julia code-with-copy"><code class="sourceCode julia"><span id="cb6-1"><a href="#cb6-1" aria-hidden="true" tabindex="-1"></a>sa <span class="op">=</span> <span class="fu">InterpolatingAdjoint</span>(autojacvec<span class="op">=</span><span class="fu">EnzymeVJP</span>())</span>
+<span id="cb6-2"><a href="#cb6-2" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-3"><a href="#cb6-3" aria-hidden="true" tabindex="-1"></a>Turing.<span class="pp">@model</span> <span class="kw">function</span> <span class="fu">sir_turing</span>(obs_data, times_data)</span>
+<span id="cb6-4"><a href="#cb6-4" aria-hidden="true" tabindex="-1"></a>    be <span class="op">~</span> <span class="fu">Gamma</span>(<span class="fl">2</span>, <span class="fl">1</span><span class="op">/</span><span class="fl">4</span>)</span>
+<span id="cb6-5"><a href="#cb6-5" aria-hidden="true" tabindex="-1"></a>    ge <span class="op">~</span> <span class="fu">Gamma</span>(<span class="fl">2</span>, <span class="fl">1</span><span class="op">/</span><span class="fl">20</span>)</span>
+<span id="cb6-6"><a href="#cb6-6" aria-hidden="true" tabindex="-1"></a>    prob <span class="op">=</span> <span class="fu">remake</span>(prob_base; p<span class="op">=</span>[sir_s.β <span class="op">=&gt;</span> be, sir_s.γ <span class="op">=&gt;</span> ge])</span>
+<span id="cb6-7"><a href="#cb6-7" aria-hidden="true" tabindex="-1"></a>    sol <span class="op">=</span> <span class="fu">solve</span>(prob, <span class="fu">Tsit5</span>(); saveat<span class="op">=</span>times_data, sensealg<span class="op">=</span>sa)</span>
+<span id="cb6-8"><a href="#cb6-8" aria-hidden="true" tabindex="-1"></a>    <span class="cf">if</span> sol.retcode <span class="op">!=</span> ReturnCode.Success</span>
+<span id="cb6-9"><a href="#cb6-9" aria-hidden="true" tabindex="-1"></a>        Turing.<span class="pp">@addlogprob</span>! <span class="op">-</span><span class="cn">Inf</span></span>
+<span id="cb6-10"><a href="#cb6-10" aria-hidden="true" tabindex="-1"></a>        <span class="cf">return</span></span>
+<span id="cb6-11"><a href="#cb6-11" aria-hidden="true" tabindex="-1"></a>    <span class="cf">end</span></span>
+<span id="cb6-12"><a href="#cb6-12" aria-hidden="true" tabindex="-1"></a>    Iv <span class="op">=</span> sol[sir_s.I]</span>
+<span id="cb6-13"><a href="#cb6-13" aria-hidden="true" tabindex="-1"></a>    <span class="cf">for</span> i <span class="kw">in</span> <span class="fu">eachindex</span>(obs_data)</span>
+<span id="cb6-14"><a href="#cb6-14" aria-hidden="true" tabindex="-1"></a>        obs_data[i] <span class="op">~</span> <span class="fu">Poisson</span>(<span class="fu">max</span>(Iv[i], <span class="fl">1e-6</span>))</span>
+<span id="cb6-15"><a href="#cb6-15" aria-hidden="true" tabindex="-1"></a>    <span class="cf">end</span></span>
+<span id="cb6-16"><a href="#cb6-16" aria-hidden="true" tabindex="-1"></a><span class="kw">end</span></span>
+<span id="cb6-17"><a href="#cb6-17" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-18"><a href="#cb6-18" aria-hidden="true" tabindex="-1"></a>mdl <span class="op">=</span> <span class="fu">sir_turing</span>(obs, data_times)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="cell-output cell-output-display" data-execution_count="1">
+<pre><code>DynamicPPL.Model{typeof(sir_turing), (:obs_data, :times_data), (), (), Tuple{Vector{Int64}, Vector{Float64}}, Tuple{}, DynamicPPL.DefaultContext, false}(sir_turing, (obs_data = [14, 24, 27, 54, 69, 112, 123, 175, 252, 302  …  74, 51, 47, 52, 47, 36, 23, 36, 29, 28], times_data = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0  …  41.0, 42.0, 43.0, 44.0, 45.0, 46.0, 47.0, 48.0, 49.0, 50.0]), NamedTuple(), DynamicPPL.DefaultContext())</code></pre>
+</div>
+</div>
+<div id="12" class="cell" data-execution_count="1">
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb8"><pre class="sourceCode julia code-with-copy"><code class="sourceCode julia"><span id="cb8-1"><a href="#cb8-1" aria-hidden="true" tabindex="-1"></a><span class="co"># Warmup</span></span>
+<span id="cb8-2"><a href="#cb8-2" aria-hidden="true" tabindex="-1"></a>_ <span class="op">=</span> <span class="fu">with_logger</span>(<span class="fu">NullLogger</span>()) <span class="cf">do</span></span>
+<span id="cb8-3"><a href="#cb8-3" aria-hidden="true" tabindex="-1"></a>    Turing.<span class="fu">sample</span>(mdl, Turing.<span class="fu">NUTS</span>(), <span class="fl">50</span>; progress<span class="op">=</span><span class="cn">false</span>)</span>
+<span id="cb8-4"><a href="#cb8-4" aria-hidden="true" tabindex="-1"></a><span class="cf">end</span></span>
+<span id="cb8-5"><a href="#cb8-5" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb8-6"><a href="#cb8-6" aria-hidden="true" tabindex="-1"></a><span class="co"># Timed run</span></span>
+<span id="cb8-7"><a href="#cb8-7" aria-hidden="true" tabindex="-1"></a>t1 <span class="op">=</span> <span class="pp">@timed</span> <span class="cf">begin</span></span>
+<span id="cb8-8"><a href="#cb8-8" aria-hidden="true" tabindex="-1"></a>    ch1 <span class="op">=</span> <span class="fu">with_logger</span>(<span class="fu">NullLogger</span>()) <span class="cf">do</span></span>
+<span id="cb8-9"><a href="#cb8-9" aria-hidden="true" tabindex="-1"></a>        Turing.<span class="fu">sample</span>(mdl, Turing.<span class="fu">NUTS</span>(), <span class="fl">2000</span>; progress<span class="op">=</span><span class="cn">false</span>)</span>
+<span id="cb8-10"><a href="#cb8-10" aria-hidden="true" tabindex="-1"></a>    <span class="cf">end</span></span>
+<span id="cb8-11"><a href="#cb8-11" aria-hidden="true" tabindex="-1"></a><span class="cf">end</span></span>
+<span id="cb8-12"><a href="#cb8-12" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb8-13"><a href="#cb8-13" aria-hidden="true" tabindex="-1"></a>burnin <span class="op">=</span> <span class="fl">500</span></span>
+<span id="cb8-14"><a href="#cb8-14" aria-hidden="true" tabindex="-1"></a>b1 <span class="op">=</span> <span class="fu">vec</span>(ch1[<span class="op">:</span>be])[burnin<span class="op">+</span><span class="fl">1</span><span class="op">:</span><span class="kw">end</span>]</span>
+<span id="cb8-15"><a href="#cb8-15" aria-hidden="true" tabindex="-1"></a>g1 <span class="op">=</span> <span class="fu">vec</span>(ch1[<span class="op">:</span>ge])[burnin<span class="op">+</span><span class="fl">1</span><span class="op">:</span><span class="kw">end</span>]</span>
+<span id="cb8-16"><a href="#cb8-16" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb8-17"><a href="#cb8-17" aria-hidden="true" tabindex="-1"></a><span class="fu">println</span>(<span class="st">"Approach 1: Turing + adjoint sensealg"</span>)</span>
+<span id="cb8-18"><a href="#cb8-18" aria-hidden="true" tabindex="-1"></a><span class="fu">println</span>(<span class="st">"  Time:     </span><span class="sc">$</span>(<span class="fu">round</span>(t1.time; digits<span class="op">=</span><span class="fl">1</span>))<span class="st">s"</span>)</span>
+<span id="cb8-19"><a href="#cb8-19" aria-hidden="true" tabindex="-1"></a><span class="fu">println</span>(<span class="st">"  β:        </span><span class="sc">$</span>(<span class="fu">round</span>(<span class="fu">mean</span>(b1); digits<span class="op">=</span><span class="fl">4</span>))<span class="st"> ± </span><span class="sc">$</span>(<span class="fu">round</span>(<span class="fu">std</span>(b1); digits<span class="op">=</span><span class="fl">4</span>))<span class="st">"</span>)</span>
+<span id="cb8-20"><a href="#cb8-20" aria-hidden="true" tabindex="-1"></a><span class="fu">println</span>(<span class="st">"  γ:        </span><span class="sc">$</span>(<span class="fu">round</span>(<span class="fu">mean</span>(g1); digits<span class="op">=</span><span class="fl">4</span>))<span class="st"> ± </span><span class="sc">$</span>(<span class="fu">round</span>(<span class="fu">std</span>(g1); digits<span class="op">=</span><span class="fl">4</span>))<span class="st">"</span>)</span>
+<span id="cb8-21"><a href="#cb8-21" aria-hidden="true" tabindex="-1"></a><span class="fu">println</span>(<span class="st">"  ESS/s(β): </span><span class="sc">$</span>(<span class="fu">round</span>(<span class="fu">ess_ipse</span>(b1)<span class="op">/</span>t1.time; digits<span class="op">=</span><span class="fl">1</span>))<span class="st">"</span>)</span>
+<span id="cb8-22"><a href="#cb8-22" aria-hidden="true" tabindex="-1"></a><span class="fu">println</span>(<span class="st">"  ESS/s(γ): </span><span class="sc">$</span>(<span class="fu">round</span>(<span class="fu">ess_ipse</span>(g1)<span class="op">/</span>t1.time; digits<span class="op">=</span><span class="fl">1</span>))<span class="st">"</span>)</span>
+<span id="cb8-23"><a href="#cb8-23" aria-hidden="true" tabindex="-1"></a><span class="fu">println</span>(<span class="st">"  iter/s:   </span><span class="sc">$</span>(<span class="fu">round</span>(<span class="fl">2000</span><span class="op">/</span>t1.time; digits<span class="op">=</span><span class="fl">0</span>))<span class="st">"</span>)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>Approach 1: Turing + adjoint sensealg
+  Time:     300.9s
+  β:        0.5052 ± 0.0035
+  γ:        0.1 ± 0.001
+  ESS/s(β): 4.9
+  ESS/s(γ): 4.7
+  iter/s:   7.0</code></pre>
+</div>
+</div>
+</section>
+<section id="approach-2-symbolic-sensitivity-equations" class="level2">
+<h2 class="anchored" data-anchor-id="approach-2-symbolic-sensitivity-equations">Approach 2: Symbolic Sensitivity Equations</h2>
+<p>Instead of using AD to differentiate through the ODE solver, we derive the <strong>forward sensitivity equations</strong> symbolically. For parameters <span class="math inline">\(\theta = (\beta, \gamma)\)</span> and state <span class="math inline">\(y = (S, I, R)\)</span>, the sensitivity matrix <span class="math inline">\(s_{ij} = \partial y_i / \partial \theta_j\)</span> satisfies:</p>
+<p><span class="math display">\[\frac{ds}{dt} = \frac{\partial f}{\partial y} s + \frac{\partial f}{\partial \theta}\]</span></p>
+<p>Both <span class="math inline">\(\partial f / \partial y\)</span> (the Jacobian) and <span class="math inline">\(\partial f / \partial \theta\)</span> can be computed symbolically using <code>Symbolics.jacobian</code>. The augmented system (9 equations: 3 state + 6 sensitivity) is solved in a single ODE call, giving us both the trajectory and its parameter derivatives.</p>
+<section id="deriving-the-augmented-system" class="level3">
+<h3 class="anchored" data-anchor-id="deriving-the-augmented-system">Deriving the Augmented System</h3>
+<div id="14" class="cell" data-execution_count="1">
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb10"><pre class="sourceCode julia code-with-copy"><code class="sourceCode julia"><span id="cb10-1"><a href="#cb10-1" aria-hidden="true" tabindex="-1"></a><span class="pp">@parameters</span> β_s γ_s N_s</span>
+<span id="cb10-2"><a href="#cb10-2" aria-hidden="true" tabindex="-1"></a><span class="pp">@variables</span> <span class="fu">S_s</span>(t) <span class="fu">I_s</span>(t) <span class="fu">R_s</span>(t)</span>
+<span id="cb10-3"><a href="#cb10-3" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb10-4"><a href="#cb10-4" aria-hidden="true" tabindex="-1"></a>f_rhs <span class="op">=</span> [<span class="op">-</span>β_s <span class="op">*</span> S_s <span class="op">*</span> I_s <span class="op">/</span> N_s,</span>
+<span id="cb10-5"><a href="#cb10-5" aria-hidden="true" tabindex="-1"></a>          β_s <span class="op">*</span> S_s <span class="op">*</span> I_s <span class="op">/</span> N_s <span class="op">-</span> γ_s <span class="op">*</span> I_s,</span>
+<span id="cb10-6"><a href="#cb10-6" aria-hidden="true" tabindex="-1"></a>          γ_s <span class="op">*</span> I_s]</span>
+<span id="cb10-7"><a href="#cb10-7" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb10-8"><a href="#cb10-8" aria-hidden="true" tabindex="-1"></a>J_fy <span class="op">=</span> Symbolics.<span class="fu">jacobian</span>(f_rhs, [S_s, I_s, R_s])</span>
+<span id="cb10-9"><a href="#cb10-9" aria-hidden="true" tabindex="-1"></a>F_fθ <span class="op">=</span> Symbolics.<span class="fu">jacobian</span>(f_rhs, [β_s, γ_s])</span>
+<span id="cb10-10"><a href="#cb10-10" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb10-11"><a href="#cb10-11" aria-hidden="true" tabindex="-1"></a><span class="fu">println</span>(<span class="st">"∂f/∂y (Jacobian):"</span>)</span>
+<span id="cb10-12"><a href="#cb10-12" aria-hidden="true" tabindex="-1"></a><span class="fu">display</span>(J_fy)</span>
+<span id="cb10-13"><a href="#cb10-13" aria-hidden="true" tabindex="-1"></a><span class="fu">println</span>(<span class="st">"</span><span class="sc">\n</span><span class="st">∂f/∂θ:"</span>)</span>
+<span id="cb10-14"><a href="#cb10-14" aria-hidden="true" tabindex="-1"></a><span class="fu">display</span>(F_fθ)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>∂f/∂y (Jacobian):
+
+∂f/∂θ:</code></pre>
+</div>
+<div class="cell-output cell-output-display">
+<pre><code>3×3 Matrix{Num}:
+ (-I_s(t)*β_s) / N_s       (-S_s(t)*β_s) / N_s  0
+  (I_s(t)*β_s) / N_s  (S_s(t)*β_s) / N_s - γ_s  0
+                   0                       γ_s  0</code></pre>
+</div>
+<div class="cell-output cell-output-display">
+<pre><code>3×2 Matrix{Num}:
+ (-S_s(t)*I_s(t)) / N_s        0
+  (S_s(t)*I_s(t)) / N_s  -I_s(t)
+                      0   I_s(t)</code></pre>
+</div>
+</div>
+</section>
+<section id="building-the-augmented-ode" class="level3">
+<h3 class="anchored" data-anchor-id="building-the-augmented-ode">Building the Augmented ODE</h3>
+<div id="16" class="cell" data-execution_count="1">
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb14"><pre class="sourceCode julia code-with-copy"><code class="sourceCode julia"><span id="cb14-1"><a href="#cb14-1" aria-hidden="true" tabindex="-1"></a><span class="pp">@variables</span> <span class="fu">s_S_β</span>(t) <span class="fu">s_I_β</span>(t) <span class="fu">s_R_β</span>(t) <span class="fu">s_S_γ</span>(t) <span class="fu">s_I_γ</span>(t) <span class="fu">s_R_γ</span>(t)</span>
+<span id="cb14-2"><a href="#cb14-2" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb14-3"><a href="#cb14-3" aria-hidden="true" tabindex="-1"></a>s_mat <span class="op">=</span> [s_S_β s_S_γ;</span>
+<span id="cb14-4"><a href="#cb14-4" aria-hidden="true" tabindex="-1"></a>         s_I_β s_I_γ;</span>
+<span id="cb14-5"><a href="#cb14-5" aria-hidden="true" tabindex="-1"></a>         s_R_β s_R_γ]</span>
+<span id="cb14-6"><a href="#cb14-6" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb14-7"><a href="#cb14-7" aria-hidden="true" tabindex="-1"></a>ds_dt <span class="op">=</span> J_fy <span class="op">*</span> s_mat <span class="op">+</span> F_fθ</span>
+<span id="cb14-8"><a href="#cb14-8" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb14-9"><a href="#cb14-9" aria-hidden="true" tabindex="-1"></a>aug_eqs <span class="op">=</span> [</span>
+<span id="cb14-10"><a href="#cb14-10" aria-hidden="true" tabindex="-1"></a>    <span class="fu">D</span>(S_s)    <span class="op">~</span> f_rhs[<span class="fl">1</span>],</span>
+<span id="cb14-11"><a href="#cb14-11" aria-hidden="true" tabindex="-1"></a>    <span class="fu">D</span>(I_s)    <span class="op">~</span> f_rhs[<span class="fl">2</span>],</span>
+<span id="cb14-12"><a href="#cb14-12" aria-hidden="true" tabindex="-1"></a>    <span class="fu">D</span>(R_s)    <span class="op">~</span> f_rhs[<span class="fl">3</span>],</span>
+<span id="cb14-13"><a href="#cb14-13" aria-hidden="true" tabindex="-1"></a>    <span class="fu">D</span>(s_S_β)  <span class="op">~</span> ds_dt[<span class="fl">1</span>,<span class="fl">1</span>],</span>
+<span id="cb14-14"><a href="#cb14-14" aria-hidden="true" tabindex="-1"></a>    <span class="fu">D</span>(s_I_β)  <span class="op">~</span> ds_dt[<span class="fl">2</span>,<span class="fl">1</span>],</span>
+<span id="cb14-15"><a href="#cb14-15" aria-hidden="true" tabindex="-1"></a>    <span class="fu">D</span>(s_R_β)  <span class="op">~</span> ds_dt[<span class="fl">3</span>,<span class="fl">1</span>],</span>
+<span id="cb14-16"><a href="#cb14-16" aria-hidden="true" tabindex="-1"></a>    <span class="fu">D</span>(s_S_γ)  <span class="op">~</span> ds_dt[<span class="fl">1</span>,<span class="fl">2</span>],</span>
+<span id="cb14-17"><a href="#cb14-17" aria-hidden="true" tabindex="-1"></a>    <span class="fu">D</span>(s_I_γ)  <span class="op">~</span> ds_dt[<span class="fl">2</span>,<span class="fl">2</span>],</span>
+<span id="cb14-18"><a href="#cb14-18" aria-hidden="true" tabindex="-1"></a>    <span class="fu">D</span>(s_R_γ)  <span class="op">~</span> ds_dt[<span class="fl">3</span>,<span class="fl">2</span>],</span>
+<span id="cb14-19"><a href="#cb14-19" aria-hidden="true" tabindex="-1"></a>]</span>
+<span id="cb14-20"><a href="#cb14-20" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb14-21"><a href="#cb14-21" aria-hidden="true" tabindex="-1"></a><span class="pp">@named</span> aug_sir <span class="op">=</span> <span class="fu">ODESystem</span>(aug_eqs, t)</span>
+<span id="cb14-22"><a href="#cb14-22" aria-hidden="true" tabindex="-1"></a>aug_sir_s <span class="op">=</span> <span class="fu">structural_simplify</span>(aug_sir)</span>
+<span id="cb14-23"><a href="#cb14-23" aria-hidden="true" tabindex="-1"></a><span class="fu">println</span>(<span class="st">"Augmented system: </span><span class="sc">$</span>(<span class="fu">length</span>(<span class="fu">unknowns</span>(aug_sir_s)))<span class="st"> unknowns, </span><span class="sc">$</span>(<span class="fu">length</span>(<span class="fu">parameters</span>(aug_sir_s)))<span class="st"> parameters"</span>)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>Augmented system: 9 unknowns, 3 parameters</code></pre>
+</div>
+</div>
+</section>
+<section id="using-odefunction-codegen" class="level3">
+<h3 class="anchored" data-anchor-id="using-odefunction-codegen">Using ODEFunction Codegen</h3>
+<p>The critical optimisation: instead of using MTK’s high-level <code>ODEProblem</code> with symbolic parameter indexing (which costs ~100ms per <code>remake</code>), we extract the compiled <code>ODEFunction</code> and work directly with numeric arrays.</p>
+<div id="18" class="cell" data-execution_count="1">
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb16"><pre class="sourceCode julia code-with-copy"><code class="sourceCode julia"><span id="cb16-1"><a href="#cb16-1" aria-hidden="true" tabindex="-1"></a>odefn <span class="op">=</span> <span class="fu">ODEFunction</span>(aug_sir_s)</span>
+<span id="cb16-2"><a href="#cb16-2" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb16-3"><a href="#cb16-3" aria-hidden="true" tabindex="-1"></a>p_syms <span class="op">=</span> <span class="fu">parameters</span>(aug_sir_s)</span>
+<span id="cb16-4"><a href="#cb16-4" aria-hidden="true" tabindex="-1"></a>u_syms <span class="op">=</span> <span class="fu">unknowns</span>(aug_sir_s)</span>
+<span id="cb16-5"><a href="#cb16-5" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb16-6"><a href="#cb16-6" aria-hidden="true" tabindex="-1"></a>p_map <span class="op">=</span> <span class="fu">Dict</span>(<span class="fu">string</span>(p) <span class="op">=&gt;</span> i <span class="cf">for</span> (i, p) <span class="kw">in</span> <span class="fu">enumerate</span>(p_syms))</span>
+<span id="cb16-7"><a href="#cb16-7" aria-hidden="true" tabindex="-1"></a>u_map <span class="op">=</span> <span class="fu">Dict</span>(<span class="fu">string</span>(u) <span class="op">=&gt;</span> i <span class="cf">for</span> (i, u) <span class="kw">in</span> <span class="fu">enumerate</span>(u_syms))</span>
+<span id="cb16-8"><a href="#cb16-8" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb16-9"><a href="#cb16-9" aria-hidden="true" tabindex="-1"></a>iβ <span class="op">=</span> p_map[<span class="st">"β_s"</span>]; iγ <span class="op">=</span> p_map[<span class="st">"γ_s"</span>]; iN <span class="op">=</span> p_map[<span class="st">"N_s"</span>]</span>
+<span id="cb16-10"><a href="#cb16-10" aria-hidden="true" tabindex="-1"></a>iI <span class="op">=</span> u_map[<span class="st">"I_s(t)"</span>]; i_sIb <span class="op">=</span> u_map[<span class="st">"s_I_β(t)"</span>]; i_sIg <span class="op">=</span> u_map[<span class="st">"s_I_γ(t)"</span>]</span>
+<span id="cb16-11"><a href="#cb16-11" aria-hidden="true" tabindex="-1"></a>iS <span class="op">=</span> u_map[<span class="st">"S_s(t)"</span>]</span>
+<span id="cb16-12"><a href="#cb16-12" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb16-13"><a href="#cb16-13" aria-hidden="true" tabindex="-1"></a><span class="fu">println</span>(<span class="st">"Parameter indices: β=</span><span class="sc">$</span>i<span class="st">β, γ=</span><span class="sc">$</span>i<span class="st">γ, N=</span><span class="sc">$</span>iN<span class="st">"</span>)</span>
+<span id="cb16-14"><a href="#cb16-14" aria-hidden="true" tabindex="-1"></a><span class="fu">println</span>(<span class="st">"State indices: I=</span><span class="sc">$</span>iI<span class="st">, s_I_β=</span><span class="sc">$</span>i_sIb<span class="st">, s_I_γ=</span><span class="sc">$</span>i_sIg<span class="st">"</span>)</span>
+<span id="cb16-15"><a href="#cb16-15" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb16-16"><a href="#cb16-16" aria-hidden="true" tabindex="-1"></a><span class="co"># Build problem with correct parameter/state ordering</span></span>
+<span id="cb16-17"><a href="#cb16-17" aria-hidden="true" tabindex="-1"></a>u0 <span class="op">=</span> <span class="fu">zeros</span>(<span class="fl">9</span>)</span>
+<span id="cb16-18"><a href="#cb16-18" aria-hidden="true" tabindex="-1"></a>u0[iS] <span class="op">=</span> <span class="fl">990.0</span>; u0[iI] <span class="op">=</span> <span class="fl">10.0</span>  <span class="co"># sensitivities start at 0</span></span>
+<span id="cb16-19"><a href="#cb16-19" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb16-20"><a href="#cb16-20" aria-hidden="true" tabindex="-1"></a>p0 <span class="op">=</span> <span class="fu">zeros</span>(<span class="fl">3</span>)</span>
+<span id="cb16-21"><a href="#cb16-21" aria-hidden="true" tabindex="-1"></a>p0[iβ] <span class="op">=</span> <span class="fl">0.5</span>; p0[iγ] <span class="op">=</span> <span class="fl">0.1</span>; p0[iN] <span class="op">=</span> <span class="fl">1000.0</span></span>
+<span id="cb16-22"><a href="#cb16-22" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb16-23"><a href="#cb16-23" aria-hidden="true" tabindex="-1"></a>prob_aug <span class="op">=</span> <span class="fu">ODEProblem</span>(odefn, u0, (<span class="fl">0.0</span>, <span class="fl">50.0</span>), p0)</span>
+<span id="cb16-24"><a href="#cb16-24" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb16-25"><a href="#cb16-25" aria-hidden="true" tabindex="-1"></a><span class="co"># Verify</span></span>
+<span id="cb16-26"><a href="#cb16-26" aria-hidden="true" tabindex="-1"></a>sol_check <span class="op">=</span> <span class="fu">solve</span>(prob_aug, <span class="fu">Tsit5</span>(); saveat<span class="op">=</span>data_times, abstol<span class="op">=</span><span class="fl">1e-8</span>, reltol<span class="op">=</span><span class="fl">1e-8</span>)</span>
+<span id="cb16-27"><a href="#cb16-27" aria-hidden="true" tabindex="-1"></a><span class="fu">println</span>(<span class="st">"</span><span class="sc">\n</span><span class="st">I(t=25) = </span><span class="sc">$</span>(<span class="fu">round</span>(sol_check[iI, <span class="fl">25</span>]; digits<span class="op">=</span><span class="fl">2</span>))<span class="st"> (expected: </span><span class="sc">$</span>(<span class="fu">round</span>(I_true[<span class="fl">26</span>]; digits<span class="op">=</span><span class="fl">2</span>))<span class="st">)"</span>)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>Parameter indices: β=1, γ=3, N=2
+State indices: I=8, s_I_β=5, s_I_γ=2
+
+I(t=25) = 272.53 (expected: 272.53)</code></pre>
+</div>
+</div>
+</section>
+<section id="analytic-gradient-computation" class="level3">
+<h3 class="anchored" data-anchor-id="analytic-gradient-computation">Analytic Gradient Computation</h3>
+<p>The log-likelihood gradient is:</p>
+<p><span class="math display">\[\frac{\partial \ell}{\partial \theta_j} = \sum_i \frac{\partial \log p(y_i \mid \lambda_i)}{\partial \lambda_i} \cdot \frac{\partial \lambda_i}{\partial \theta_j}\]</span></p>
+<p>where <span class="math inline">\(\lambda_i = I(t_i)\)</span> and <span class="math inline">\(\partial \lambda_i / \partial \theta_j = s_{I,j}(t_i)\)</span> comes directly from the augmented ODE solution. For <span class="math inline">\(\text{Poisson}(\lambda)\)</span>:</p>
+<p><span class="math display">\[\frac{\partial}{\partial \lambda} \log p(k \mid \lambda) = \frac{k}{\lambda} - 1\]</span></p>
+<div id="20" class="cell" data-execution_count="1">
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb18"><pre class="sourceCode julia code-with-copy"><code class="sourceCode julia"><span id="cb18-1"><a href="#cb18-1" aria-hidden="true" tabindex="-1"></a><span class="kw">struct</span> SymSensLogDensity</span>
+<span id="cb18-2"><a href="#cb18-2" aria-hidden="true" tabindex="-1"></a>    prob<span class="op">::</span><span class="dt">ODEProblem</span></span>
+<span id="cb18-3"><a href="#cb18-3" aria-hidden="true" tabindex="-1"></a>    obs<span class="op">::</span><span class="dt">Vector{Int}</span></span>
+<span id="cb18-4"><a href="#cb18-4" aria-hidden="true" tabindex="-1"></a>    times<span class="op">::</span><span class="dt">Vector{Float64}</span></span>
+<span id="cb18-5"><a href="#cb18-5" aria-hidden="true" tabindex="-1"></a>    iβ<span class="op">::</span><span class="dt">Int</span>; iγ<span class="op">::</span><span class="dt">Int</span>; iI<span class="op">::</span><span class="dt">Int</span>; i_sIb<span class="op">::</span><span class="dt">Int</span>; i_sIg<span class="op">::</span><span class="dt">Int</span></span>
+<span id="cb18-6"><a href="#cb18-6" aria-hidden="true" tabindex="-1"></a>    p_buf<span class="op">::</span><span class="dt">Vector{Float64}</span></span>
+<span id="cb18-7"><a href="#cb18-7" aria-hidden="true" tabindex="-1"></a><span class="kw">end</span></span>
+<span id="cb18-8"><a href="#cb18-8" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb18-9"><a href="#cb18-9" aria-hidden="true" tabindex="-1"></a><span class="kw">function</span> LogDensityProblems.<span class="fu">logdensity_and_gradient</span>(ld<span class="op">::</span><span class="dt">SymSensLogDensity</span>, θ_log)</span>
+<span id="cb18-10"><a href="#cb18-10" aria-hidden="true" tabindex="-1"></a>    be <span class="op">=</span> <span class="fu">exp</span>(θ_log[<span class="fl">1</span>]); ge <span class="op">=</span> <span class="fu">exp</span>(θ_log[<span class="fl">2</span>])</span>
+<span id="cb18-11"><a href="#cb18-11" aria-hidden="true" tabindex="-1"></a>    ld.p_buf[ld.iβ] <span class="op">=</span> be; ld.p_buf[ld.iγ] <span class="op">=</span> ge</span>
+<span id="cb18-12"><a href="#cb18-12" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb18-13"><a href="#cb18-13" aria-hidden="true" tabindex="-1"></a>    p2 <span class="op">=</span> <span class="fu">remake</span>(ld.prob; p<span class="op">=</span>ld.p_buf)</span>
+<span id="cb18-14"><a href="#cb18-14" aria-hidden="true" tabindex="-1"></a>    sol <span class="op">=</span> <span class="fu">solve</span>(p2, <span class="fu">Tsit5</span>(); saveat<span class="op">=</span>ld.times, abstol<span class="op">=</span><span class="fl">1e-8</span>, reltol<span class="op">=</span><span class="fl">1e-8</span>)</span>
+<span id="cb18-15"><a href="#cb18-15" aria-hidden="true" tabindex="-1"></a>    sol.retcode <span class="op">!=</span> ReturnCode.Success <span class="op">&amp;&amp;</span> <span class="cf">return</span> (<span class="op">-</span><span class="cn">Inf</span>, [<span class="fl">0.0</span>, <span class="fl">0.0</span>])</span>
+<span id="cb18-16"><a href="#cb18-16" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb18-17"><a href="#cb18-17" aria-hidden="true" tabindex="-1"></a>    ll <span class="op">=</span> <span class="fl">0.0</span>; dll_db <span class="op">=</span> <span class="fl">0.0</span>; dll_dg <span class="op">=</span> <span class="fl">0.0</span></span>
+<span id="cb18-18"><a href="#cb18-18" aria-hidden="true" tabindex="-1"></a>    <span class="cf">for</span> i <span class="kw">in</span> <span class="fu">eachindex</span>(ld.obs)</span>
+<span id="cb18-19"><a href="#cb18-19" aria-hidden="true" tabindex="-1"></a>        Iv <span class="op">=</span> sol[ld.iI, i]</span>
+<span id="cb18-20"><a href="#cb18-20" aria-hidden="true" tabindex="-1"></a>        lam <span class="op">=</span> <span class="fu">max</span>(Iv, <span class="fl">1e-6</span>)</span>
+<span id="cb18-21"><a href="#cb18-21" aria-hidden="true" tabindex="-1"></a>        ll <span class="op">+=</span> <span class="fu">logpdf</span>(<span class="fu">Poisson</span>(lam), ld.obs[i])</span>
+<span id="cb18-22"><a href="#cb18-22" aria-hidden="true" tabindex="-1"></a>        <span class="cf">if</span> Iv <span class="op">&gt;</span> <span class="fl">1e-6</span></span>
+<span id="cb18-23"><a href="#cb18-23" aria-hidden="true" tabindex="-1"></a>            dlogp <span class="op">=</span> ld.obs[i] <span class="op">/</span> lam <span class="op">-</span> <span class="fl">1.0</span></span>
+<span id="cb18-24"><a href="#cb18-24" aria-hidden="true" tabindex="-1"></a>            dll_db <span class="op">+=</span> dlogp <span class="op">*</span> sol[ld.i_sIb, i]</span>
+<span id="cb18-25"><a href="#cb18-25" aria-hidden="true" tabindex="-1"></a>            dll_dg <span class="op">+=</span> dlogp <span class="op">*</span> sol[ld.i_sIg, i]</span>
+<span id="cb18-26"><a href="#cb18-26" aria-hidden="true" tabindex="-1"></a>        <span class="cf">end</span></span>
+<span id="cb18-27"><a href="#cb18-27" aria-hidden="true" tabindex="-1"></a>    <span class="cf">end</span></span>
+<span id="cb18-28"><a href="#cb18-28" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb18-29"><a href="#cb18-29" aria-hidden="true" tabindex="-1"></a>    <span class="co"># Prior (log-transformed) + Jacobian correction</span></span>
+<span id="cb18-30"><a href="#cb18-30" aria-hidden="true" tabindex="-1"></a>    ll <span class="op">+=</span> <span class="fu">logpdf</span>(<span class="fu">Gamma</span>(<span class="fl">2</span>, <span class="fl">1</span><span class="op">/</span><span class="fl">4</span>), be) <span class="op">+</span> θ_log[<span class="fl">1</span>]</span>
+<span id="cb18-31"><a href="#cb18-31" aria-hidden="true" tabindex="-1"></a>    ll <span class="op">+=</span> <span class="fu">logpdf</span>(<span class="fu">Gamma</span>(<span class="fl">2</span>, <span class="fl">1</span><span class="op">/</span><span class="fl">20</span>), ge) <span class="op">+</span> θ_log[<span class="fl">2</span>]</span>
+<span id="cb18-32"><a href="#cb18-32" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb18-33"><a href="#cb18-33" aria-hidden="true" tabindex="-1"></a>    <span class="co"># Chain rule: ∂/∂(log θ) = θ · ∂/∂θ</span></span>
+<span id="cb18-34"><a href="#cb18-34" aria-hidden="true" tabindex="-1"></a>    dp_db <span class="op">=</span> <span class="fl">1.0</span> <span class="op">/</span> be <span class="op">-</span> <span class="fl">4.0</span>    <span class="co"># ∂ log Gamma(2, 1/4) / ∂β</span></span>
+<span id="cb18-35"><a href="#cb18-35" aria-hidden="true" tabindex="-1"></a>    dp_dg <span class="op">=</span> <span class="fl">1.0</span> <span class="op">/</span> ge <span class="op">-</span> <span class="fl">20.0</span>   <span class="co"># ∂ log Gamma(2, 1/20) / ∂γ</span></span>
+<span id="cb18-36"><a href="#cb18-36" aria-hidden="true" tabindex="-1"></a>    g1 <span class="op">=</span> (dll_db <span class="op">+</span> dp_db) <span class="op">*</span> be <span class="op">+</span> <span class="fl">1.0</span></span>
+<span id="cb18-37"><a href="#cb18-37" aria-hidden="true" tabindex="-1"></a>    g2 <span class="op">=</span> (dll_dg <span class="op">+</span> dp_dg) <span class="op">*</span> ge <span class="op">+</span> <span class="fl">1.0</span></span>
+<span id="cb18-38"><a href="#cb18-38" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb18-39"><a href="#cb18-39" aria-hidden="true" tabindex="-1"></a>    <span class="cf">return</span> (ll, [g1, g2])</span>
+<span id="cb18-40"><a href="#cb18-40" aria-hidden="true" tabindex="-1"></a><span class="kw">end</span></span>
+<span id="cb18-41"><a href="#cb18-41" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb18-42"><a href="#cb18-42" aria-hidden="true" tabindex="-1"></a><span class="kw">function</span> LogDensityProblems.<span class="fu">logdensity</span>(ld<span class="op">::</span><span class="dt">SymSensLogDensity</span>, θ)</span>
+<span id="cb18-43"><a href="#cb18-43" aria-hidden="true" tabindex="-1"></a>    <span class="cf">return</span> LogDensityProblems.<span class="fu">logdensity_and_gradient</span>(ld, θ)[<span class="fl">1</span>]</span>
+<span id="cb18-44"><a href="#cb18-44" aria-hidden="true" tabindex="-1"></a><span class="kw">end</span></span>
+<span id="cb18-45"><a href="#cb18-45" aria-hidden="true" tabindex="-1"></a>LogDensityProblems.<span class="fu">dimension</span>(<span class="op">::</span><span class="dt">SymSensLogDensity</span>) <span class="op">=</span> <span class="fl">2</span></span>
+<span id="cb18-46"><a href="#cb18-46" aria-hidden="true" tabindex="-1"></a>LogDensityProblems.<span class="fu">capabilities</span>(<span class="op">::</span><span class="dt">Type{SymSensLogDensity}</span>) <span class="op">=</span> LogDensityProblems.<span class="fu">LogDensityOrder</span><span class="dt">{1}</span>()</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+</div>
+</section>
+<section id="gradient-verification" class="level3">
+<h3 class="anchored" data-anchor-id="gradient-verification">Gradient Verification</h3>
+<div id="22" class="cell" data-execution_count="1">
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb19"><pre class="sourceCode julia code-with-copy"><code class="sourceCode julia"><span id="cb19-1"><a href="#cb19-1" aria-hidden="true" tabindex="-1"></a>ld <span class="op">=</span> <span class="fu">SymSensLogDensity</span>(prob_aug, obs, data_times, iβ, iγ, iI, i_sIb, i_sIg, <span class="fu">copy</span>(p0))</span>
+<span id="cb19-2"><a href="#cb19-2" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb19-3"><a href="#cb19-3" aria-hidden="true" tabindex="-1"></a>θ<span class="fl">0</span> <span class="op">=</span> [<span class="fu">log</span>(<span class="fl">0.5</span>), <span class="fu">log</span>(<span class="fl">0.1</span>)]</span>
+<span id="cb19-4"><a href="#cb19-4" aria-hidden="true" tabindex="-1"></a>ll0, g0 <span class="op">=</span> LogDensityProblems.<span class="fu">logdensity_and_gradient</span>(ld, θ<span class="fl">0</span>)</span>
+<span id="cb19-5"><a href="#cb19-5" aria-hidden="true" tabindex="-1"></a><span class="fu">println</span>(<span class="st">"Log-density at truth: </span><span class="sc">$</span>(<span class="fu">round</span>(ll0; digits<span class="op">=</span><span class="fl">2</span>))<span class="st">"</span>)</span>
+<span id="cb19-6"><a href="#cb19-6" aria-hidden="true" tabindex="-1"></a><span class="fu">println</span>(<span class="st">"Analytic gradient:    </span><span class="sc">$</span>(<span class="fu">round</span>.(g0; digits<span class="op">=</span><span class="fl">4</span>))<span class="st">"</span>)</span>
+<span id="cb19-7"><a href="#cb19-7" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb19-8"><a href="#cb19-8" aria-hidden="true" tabindex="-1"></a><span class="co"># Finite difference check</span></span>
+<span id="cb19-9"><a href="#cb19-9" aria-hidden="true" tabindex="-1"></a>h <span class="op">=</span> <span class="fl">1e-5</span></span>
+<span id="cb19-10"><a href="#cb19-10" aria-hidden="true" tabindex="-1"></a><span class="cf">for</span> i <span class="kw">in</span> <span class="fl">1</span><span class="op">:</span><span class="fl">2</span></span>
+<span id="cb19-11"><a href="#cb19-11" aria-hidden="true" tabindex="-1"></a>    θp <span class="op">=</span> <span class="fu">copy</span>(θ<span class="fl">0</span>); θp[i] <span class="op">+=</span> h</span>
+<span id="cb19-12"><a href="#cb19-12" aria-hidden="true" tabindex="-1"></a>    θm <span class="op">=</span> <span class="fu">copy</span>(θ<span class="fl">0</span>); θm[i] <span class="op">-=</span> h</span>
+<span id="cb19-13"><a href="#cb19-13" aria-hidden="true" tabindex="-1"></a>    fd <span class="op">=</span> (LogDensityProblems.<span class="fu">logdensity</span>(ld, θp) <span class="op">-</span> LogDensityProblems.<span class="fu">logdensity</span>(ld, θm)) <span class="op">/</span> (<span class="fl">2</span>h)</span>
+<span id="cb19-14"><a href="#cb19-14" aria-hidden="true" tabindex="-1"></a>    <span class="fu">println</span>(<span class="st">"  param </span><span class="sc">$</span>i<span class="st">: analytic=</span><span class="sc">$</span>(<span class="fu">round</span>(g0[i]; digits<span class="op">=</span><span class="fl">4</span>))<span class="st">  finite_diff=</span><span class="sc">$</span>(<span class="fu">round</span>(fd; digits<span class="op">=</span><span class="fl">4</span>))<span class="st">"</span>)</span>
+<span id="cb19-15"><a href="#cb19-15" aria-hidden="true" tabindex="-1"></a><span class="cf">end</span></span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>Log-density at truth: -195.3
+Analytic gradient:    [233.5606, 41.7046]
+  param 1: analytic=233.5606  finite_diff=233.5606
+  param 2: analytic=41.7046  finite_diff=41.7046</code></pre>
+</div>
+</div>
+</section>
+<section id="nuts-sampling" class="level3">
+<h3 class="anchored" data-anchor-id="nuts-sampling">NUTS Sampling</h3>
+<div id="24" class="cell" data-execution_count="1">
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb21"><pre class="sourceCode julia code-with-copy"><code class="sourceCode julia"><span id="cb21-1"><a href="#cb21-1" aria-hidden="true" tabindex="-1"></a>nuts <span class="op">=</span> AdvancedHMC.<span class="fu">NUTS</span>(<span class="fl">0.8</span>; max_depth<span class="op">=</span><span class="fl">10</span>)</span>
+<span id="cb21-2"><a href="#cb21-2" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb21-3"><a href="#cb21-3" aria-hidden="true" tabindex="-1"></a><span class="co"># Warmup</span></span>
+<span id="cb21-4"><a href="#cb21-4" aria-hidden="true" tabindex="-1"></a>_ <span class="op">=</span> AdvancedHMC.<span class="fu">sample</span>(ld, nuts, <span class="fl">200</span>; initial_params<span class="op">=</span>θ<span class="fl">0</span>, progress<span class="op">=</span><span class="cn">false</span>, verbose<span class="op">=</span><span class="cn">false</span>)</span>
+<span id="cb21-5"><a href="#cb21-5" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb21-6"><a href="#cb21-6" aria-hidden="true" tabindex="-1"></a><span class="co"># Timed run</span></span>
+<span id="cb21-7"><a href="#cb21-7" aria-hidden="true" tabindex="-1"></a>t2 <span class="op">=</span> <span class="pp">@timed</span> <span class="cf">begin</span></span>
+<span id="cb21-8"><a href="#cb21-8" aria-hidden="true" tabindex="-1"></a>    chain2 <span class="op">=</span> AdvancedHMC.<span class="fu">sample</span>(ld, nuts, <span class="fl">2000</span>; initial_params<span class="op">=</span>θ<span class="fl">0</span>, progress<span class="op">=</span><span class="cn">false</span>, verbose<span class="op">=</span><span class="cn">false</span>)</span>
+<span id="cb21-9"><a href="#cb21-9" aria-hidden="true" tabindex="-1"></a><span class="cf">end</span></span>
+<span id="cb21-10"><a href="#cb21-10" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb21-11"><a href="#cb21-11" aria-hidden="true" tabindex="-1"></a>b2 <span class="op">=</span> [<span class="fu">exp</span>(chain2[i].z.θ[<span class="fl">1</span>]) for i <span class="kw">in</span> burnin<span class="op">+</span><span class="fl">1</span><span class="op">:</span><span class="fu">length</span>(chain2)]</span>
+<span id="cb21-12"><a href="#cb21-12" aria-hidden="true" tabindex="-1"></a>g2 <span class="op">=</span> [<span class="fu">exp</span>(chain2[i].z.θ[<span class="fl">2</span>]) for i <span class="kw">in</span> burnin<span class="op">+</span><span class="fl">1</span><span class="op">:</span><span class="fu">length</span>(chain2)]</span>
+<span id="cb21-13"><a href="#cb21-13" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb21-14"><a href="#cb21-14" aria-hidden="true" tabindex="-1"></a><span class="fu">println</span>(<span class="st">"Approach 2: SymSens + ODEFunction codegen + AdvancedHMC"</span>)</span>
+<span id="cb21-15"><a href="#cb21-15" aria-hidden="true" tabindex="-1"></a><span class="fu">println</span>(<span class="st">"  Time:     </span><span class="sc">$</span>(<span class="fu">round</span>(t2.time; digits<span class="op">=</span><span class="fl">2</span>))<span class="st">s"</span>)</span>
+<span id="cb21-16"><a href="#cb21-16" aria-hidden="true" tabindex="-1"></a><span class="fu">println</span>(<span class="st">"  β:        </span><span class="sc">$</span>(<span class="fu">round</span>(<span class="fu">mean</span>(b2); digits<span class="op">=</span><span class="fl">4</span>))<span class="st"> ± </span><span class="sc">$</span>(<span class="fu">round</span>(<span class="fu">std</span>(b2); digits<span class="op">=</span><span class="fl">4</span>))<span class="st">"</span>)</span>
+<span id="cb21-17"><a href="#cb21-17" aria-hidden="true" tabindex="-1"></a><span class="fu">println</span>(<span class="st">"  γ:        </span><span class="sc">$</span>(<span class="fu">round</span>(<span class="fu">mean</span>(g2); digits<span class="op">=</span><span class="fl">4</span>))<span class="st"> ± </span><span class="sc">$</span>(<span class="fu">round</span>(<span class="fu">std</span>(g2); digits<span class="op">=</span><span class="fl">4</span>))<span class="st">"</span>)</span>
+<span id="cb21-18"><a href="#cb21-18" aria-hidden="true" tabindex="-1"></a><span class="fu">println</span>(<span class="st">"  ESS/s(β): </span><span class="sc">$</span>(<span class="fu">round</span>(<span class="fu">ess_ipse</span>(b2)<span class="op">/</span>t2.time; digits<span class="op">=</span><span class="fl">1</span>))<span class="st">"</span>)</span>
+<span id="cb21-19"><a href="#cb21-19" aria-hidden="true" tabindex="-1"></a><span class="fu">println</span>(<span class="st">"  ESS/s(γ): </span><span class="sc">$</span>(<span class="fu">round</span>(<span class="fu">ess_ipse</span>(g2)<span class="op">/</span>t2.time; digits<span class="op">=</span><span class="fl">1</span>))<span class="st">"</span>)</span>
+<span id="cb21-20"><a href="#cb21-20" aria-hidden="true" tabindex="-1"></a><span class="fu">println</span>(<span class="st">"  iter/s:   </span><span class="sc">$</span>(<span class="fu">round</span>(<span class="fl">2000</span><span class="op">/</span>t2.time; digits<span class="op">=</span><span class="fl">0</span>))<span class="st">"</span>)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="cell-output cell-output-stdout">
+<div class="ansi-escaped-output">
+<pre><span class="ansi-cyan-fg ansi-bold">[ </span><span class="ansi-cyan-fg ansi-bold">Info: </span>Found initial step size 0.00625
+<span class="ansi-cyan-fg ansi-bold">[ </span><span class="ansi-cyan-fg ansi-bold">Info: </span>Found initial step size 0.00625
+Approach 2: SymSens + ODEFunction codegen + AdvancedHMC
+  Time:     1.71s
+  β:        0.5053 ± 0.0035
+  γ:        0.1001 ± 0.001
+  ESS/s(β): 797.8
+  ESS/s(γ): 463.5
+  iter/s:   1172.0
+</pre>
+</div>
+</div>
+</div>
+</section>
+</section>
+<section id="comparison" class="level2">
+<h2 class="anchored" data-anchor-id="comparison">Comparison</h2>
+<div id="cell-fig-comparison" class="cell" data-execution_count="1">
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb22"><pre class="sourceCode julia code-with-copy"><code class="sourceCode julia"><span id="cb22-1"><a href="#cb22-1" aria-hidden="true" tabindex="-1"></a>fig <span class="op">=</span> <span class="fu">Figure</span>(size<span class="op">=</span>(<span class="fl">800</span>, <span class="fl">400</span>))</span>
+<span id="cb22-2"><a href="#cb22-2" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb22-3"><a href="#cb22-3" aria-hidden="true" tabindex="-1"></a>ax1 <span class="op">=</span> <span class="fu">Axis</span>(fig[<span class="fl">1</span>, <span class="fl">1</span>]; xlabel<span class="op">=</span><span class="st">"β"</span>, ylabel<span class="op">=</span><span class="st">"Density"</span>, title<span class="op">=</span><span class="st">"Posterior: β"</span>)</span>
+<span id="cb22-4"><a href="#cb22-4" aria-hidden="true" tabindex="-1"></a><span class="fu">hist!</span>(ax1, b1; bins<span class="op">=</span><span class="fl">40</span>, color<span class="op">=</span>(<span class="op">:</span>steelblue, <span class="fl">0.5</span>), normalization<span class="op">=:</span>pdf, label<span class="op">=</span><span class="st">"Turing (</span><span class="sc">$</span>(<span class="fu">round</span>(t1.time; digits<span class="op">=</span><span class="fl">0</span>))<span class="st">s)"</span>)</span>
+<span id="cb22-5"><a href="#cb22-5" aria-hidden="true" tabindex="-1"></a><span class="fu">hist!</span>(ax1, b2; bins<span class="op">=</span><span class="fl">40</span>, color<span class="op">=</span>(<span class="op">:</span>orange, <span class="fl">0.5</span>), normalization<span class="op">=:</span>pdf, label<span class="op">=</span><span class="st">"SymSens (</span><span class="sc">$</span>(<span class="fu">round</span>(t2.time; digits<span class="op">=</span><span class="fl">1</span>))<span class="st">s)"</span>)</span>
+<span id="cb22-6"><a href="#cb22-6" aria-hidden="true" tabindex="-1"></a><span class="fu">vlines!</span>(ax1, [<span class="fl">0.5</span>]; color<span class="op">=:</span>red, linestyle<span class="op">=:</span>dash, label<span class="op">=</span><span class="st">"Truth"</span>)</span>
+<span id="cb22-7"><a href="#cb22-7" aria-hidden="true" tabindex="-1"></a><span class="fu">axislegend</span>(ax1; position<span class="op">=:</span>rt)</span>
+<span id="cb22-8"><a href="#cb22-8" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb22-9"><a href="#cb22-9" aria-hidden="true" tabindex="-1"></a>ax2 <span class="op">=</span> <span class="fu">Axis</span>(fig[<span class="fl">1</span>, <span class="fl">2</span>]; xlabel<span class="op">=</span><span class="st">"γ"</span>, ylabel<span class="op">=</span><span class="st">"Density"</span>, title<span class="op">=</span><span class="st">"Posterior: γ"</span>)</span>
+<span id="cb22-10"><a href="#cb22-10" aria-hidden="true" tabindex="-1"></a><span class="fu">hist!</span>(ax2, g1; bins<span class="op">=</span><span class="fl">40</span>, color<span class="op">=</span>(<span class="op">:</span>steelblue, <span class="fl">0.5</span>), normalization<span class="op">=:</span>pdf, label<span class="op">=</span><span class="st">"Turing"</span>)</span>
+<span id="cb22-11"><a href="#cb22-11" aria-hidden="true" tabindex="-1"></a><span class="fu">hist!</span>(ax2, g2; bins<span class="op">=</span><span class="fl">40</span>, color<span class="op">=</span>(<span class="op">:</span>orange, <span class="fl">0.5</span>), normalization<span class="op">=:</span>pdf, label<span class="op">=</span><span class="st">"SymSens"</span>)</span>
+<span id="cb22-12"><a href="#cb22-12" aria-hidden="true" tabindex="-1"></a><span class="fu">vlines!</span>(ax2, [<span class="fl">0.1</span>]; color<span class="op">=:</span>red, linestyle<span class="op">=:</span>dash, label<span class="op">=</span><span class="st">"Truth"</span>)</span>
+<span id="cb22-13"><a href="#cb22-13" aria-hidden="true" tabindex="-1"></a><span class="fu">axislegend</span>(ax2; position<span class="op">=:</span>rt)</span>
+<span id="cb22-14"><a href="#cb22-14" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb22-15"><a href="#cb22-15" aria-hidden="true" tabindex="-1"></a>fig</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div id="fig-comparison" class="cell-output cell-output-display quarto-float quarto-figure quarto-figure-center anchored" data-execution_count="1">
+<figure class="quarto-float quarto-float-fig figure">
+<div aria-describedby="fig-comparison-caption-0ceaefa1-69ba-4598-a22c-09a6ac19f8ca">
+<img width="800" height="400" style="object-fit: contain; height: auto;" src="data:image/png;base64, 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IiIiIiLSQxxERERERER6iINIL2JWryZvyRKYPRtcFxEREXlX/potuLX11E0tQyRTOYj0IlZNDfnz5kF1NbguIiIi8q6CVRspWraWuqlliGQqBxERERERkR7iICIiIiIi0kMcREREREREeoiDSG8R+gRXfo63Z5xLidMCbS3ErKANERGRQ93WyyayadYERDKZg0hvkW7GWn8nuW1tsLcfHWW327QjIiIi8n/SjbDhHvbriJlI7+QgIiIiIpJpgjQ01yKZx0GklwjDkP0JEREREZG+wEGkl3hz+17M02+Q+/JGai8cT+jYxEyiPyIiIoe6/DVbcGvrqZtahkimchDpRfq9vo2hi1eyZ/KJhI6NiIiIvKtg1UaKlq2lbmoZIpnKQeQga25Ls+KNHXSlpCCHk44oRkREREQOTQ4iB5kXhNTtbaMrrmMjIiIiIocuBxERERERkR7iINKL1H3mRLZ96nhc10VERORAJNM+ze1pInZLkqyURyzl+fQlWy+byKZZExDJZA4iIiIiGeytXU2sXFdHpH96ByPb9hJL2BYi0rs4iIiIiIiI9BAHERERERGRHuIg0ovkrqsj9+WNNFw4ntCxkcy2+e1mPD+g3YS8seNNOjr/lMMpzHUREZEDl79mC25tPXVTyxDJVA4ivUi/17cxdPFK9kw+kdCxERERkXcVrNpI0bK11E0tQyRTOYj0oMa2FE++vJmu2OkWjkNERERE+jIHkR7k+SE797TRlQEJDxERERHp2xxERERERER6iINIL1L3mRPZ9qnjcV0XERERea+tl01k06wJiGQyBxERkQz1wAMP8Ic//IEf/OAHdLRixQrmzp1LbW0tEyZM4LbbbqOoqIjY3Xffzd13301LSwsXXHABc+fOxbIsRKT32tOSZE9LiphneThBK5HCXJdBBdlIZnAQERHJMOl0mpUrV/Ktb32L8vJyOlq/fj1nn302X/va17jhhhv47ne/y3nnncdzzz1H5P7776eqqopFixYxcOBArrrqKtLpNPPnz0dEeq+0F5D2A2JpkyYRponkuDaSORxERLpdSCJopiPjNULaBTsbLBeRv0d5eTmvvfYara2tdHb33XdzyimncPPNNxM5/vjjKS0tZfXq1Zx88sncdtttfP3rX6eiooLID37wAy6//HLmzp1LVlYWIiLSvRxEepHcdXXkvryRhgvHEzo2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1XAQQgghhBBCiBbiIIQQQgghhBAtxEEIIYQQQgghWoiDEEIIIYQQQrQQByHOs3g8TklJCTt27KBXr17Mnj2bnJwcUjl06BArVqwgWWZmJnPmzCFh165drFy5kpMnTzJ58mSuueYaxPlRU1NDSUkJBw4cYPjw4Xz7299GKUUqhw4dYsWKFSTLzMxkzpw5JGtoaOC+++7jiSeeQJw/NTU1lJSUcODAAYYPH863v/1tlFKkcujQIVasWEGyzMxM5syZg0drzfLly9m8eTN+v5+JEyfy93//94gLz9q1a3nxxRfJycmhuLiYvn378mni8TglJSXs2LGDXr16MXv2bHJyckjYt28fzzzzDDU1NQwbNoxbb70V27ZJ2LhxI6tWraKxsZExY8Ywffp0lFK0B/F4nJKSEnbs2EGvXr2YPXs2OTk5fJb58+ezYMECOnXqRLJdu3axcuVKTp48yeTJk7nmmmtItnbtWl588UVycnIoLi6mb9++tBe7du1i5cqVnDx5ksmTJ3PNNdfwWRoaGrjvvvt44oknSBaPxykpKWHHjh306tWL2bNnk5OTQ8L+/fspKSnh3XffpaCggNtuu41gMIg4ew5CnGczZsxg165dzJw5kzVr1rBixQq2bt1Keno6zW3atInFixczcOBAEjp16sScOXPwbNu2jTFjxlBUVEQwGGTKlCksW7aM4uJixJervr6eESNG0L17d0aMGMGDDz7I1q1b+fnPf04qmzZtYvHixQwcOJCETp06MWfOHBKMMTzyyCOUlZUhzp/6+npGjBhB9+7dGTFiBA8++CBbt27l5z//Oals2rSJxYsXM3DgQBI6derEnDlz8MyePZuysjLuuOMOGhoaKCoqYv78+TzwwAOIC8dTTz3Ffffdxx133MHBgwf5xje+webNm+nXrx+pzJgxg127djFz5kzWrFnDihUr2Lp1K+np6fzP//wP11xzDd/85jfp1asXS5cu5T//8z/5j//4DzzPPvsst912G0VFRWRnZ3PnnXfyxz/+kX/+53+mPZgxYwa7du1i5syZrFmzhhUrVrB161bS09P5NP/1X//F0qVL+f73v0+nTp1I2LZtG2PGjKGoqIhgMMiUKVNYtmwZxcXFeJ566inuu+8+7rjjDg4ePMg3vvENNm/eTL9+/Wjrtm3bxpgxYygqKiIYDDJlyhSWLVtGcXExn8YY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" class="figure-img">
+</div>
+<figcaption class="quarto-float-caption-bottom quarto-float-caption quarto-float-fig" id="fig-comparison-caption-0ceaefa1-69ba-4598-a22c-09a6ac19f8ca">
+Figure&nbsp;1: Posterior distributions from both approaches
+</figcaption>
+</figure>
+</div>
+</div>
+</section>
+<section id="performance-summary" class="level2">
+<h2 class="anchored" data-anchor-id="performance-summary">Performance Summary</h2>
+<div id="28" class="cell" data-execution_count="1">
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb23"><pre class="sourceCode julia code-with-copy"><code class="sourceCode julia"><span id="cb23-1"><a href="#cb23-1" aria-hidden="true" tabindex="-1"></a>speedup <span class="op">=</span> <span class="fu">round</span>(t1.time <span class="op">/</span> t2.time; digits<span class="op">=</span><span class="fl">0</span>)</span>
+<span id="cb23-2"><a href="#cb23-2" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb23-3"><a href="#cb23-3" aria-hidden="true" tabindex="-1"></a><span class="fu">println</span>(<span class="st">"╔══════════════════════════════════════════════════════════════╗"</span>)</span>
+<span id="cb23-4"><a href="#cb23-4" aria-hidden="true" tabindex="-1"></a><span class="fu">println</span>(<span class="st">"║                   Performance Comparison                    ║"</span>)</span>
+<span id="cb23-5"><a href="#cb23-5" aria-hidden="true" tabindex="-1"></a><span class="fu">println</span>(<span class="st">"╠══════════════════════════════════════════════════════════════╣"</span>)</span>
+<span id="cb23-6"><a href="#cb23-6" aria-hidden="true" tabindex="-1"></a><span class="fu">println</span>(<span class="st">"║ Approach                        │ Time   │ ESS/s(β)│iter/s ║"</span>)</span>
+<span id="cb23-7"><a href="#cb23-7" aria-hidden="true" tabindex="-1"></a><span class="fu">println</span>(<span class="st">"╠═════════════════════════════════╪════════╪═════════╪═══════╣"</span>)</span>
+<span id="cb23-8"><a href="#cb23-8" aria-hidden="true" tabindex="-1"></a><span class="fu">println</span>(<span class="st">"║ Turing + adjoint sensealg       │</span><span class="sc">$</span>(<span class="fu">lpad</span>(<span class="fu">round</span>(t1.time;digits<span class="op">=</span><span class="fl">0</span>),<span class="fl">5</span>))<span class="st">s │</span><span class="sc">$</span>(<span class="fu">lpad</span>(<span class="fu">round</span>(<span class="fu">ess_ipse</span>(b1)<span class="op">/</span>t1.time;digits<span class="op">=</span><span class="fl">1</span>),<span class="fl">7</span>))<span class="st"> │</span><span class="sc">$</span>(<span class="fu">lpad</span>(<span class="fu">round</span>(<span class="fl">2000</span><span class="op">/</span>t1.time;digits<span class="op">=</span><span class="fl">0</span>),<span class="fl">5</span>))<span class="st">  ║"</span>)</span>
+<span id="cb23-9"><a href="#cb23-9" aria-hidden="true" tabindex="-1"></a><span class="fu">println</span>(<span class="st">"║ SymSens + codegen + AdvancedHMC │</span><span class="sc">$</span>(<span class="fu">lpad</span>(<span class="fu">round</span>(t2.time;digits<span class="op">=</span><span class="fl">1</span>),<span class="fl">5</span>))<span class="st">s │</span><span class="sc">$</span>(<span class="fu">lpad</span>(<span class="fu">round</span>(<span class="fu">ess_ipse</span>(b2)<span class="op">/</span>t2.time;digits<span class="op">=</span><span class="fl">1</span>),<span class="fl">7</span>))<span class="st"> │</span><span class="sc">$</span>(<span class="fu">lpad</span>(<span class="fu">round</span>(<span class="fl">2000</span><span class="op">/</span>t2.time;digits<span class="op">=</span><span class="fl">0</span>),<span class="fl">5</span>))<span class="st">  ║"</span>)</span>
+<span id="cb23-10"><a href="#cb23-10" aria-hidden="true" tabindex="-1"></a><span class="fu">println</span>(<span class="st">"╠═════════════════════════════════╪════════╪═════════╪═══════╣"</span>)</span>
+<span id="cb23-11"><a href="#cb23-11" aria-hidden="true" tabindex="-1"></a><span class="fu">println</span>(<span class="st">"║ Speedup                         │  </span><span class="sc">$</span>(<span class="fu">lpad</span>(speedup,<span class="fl">3</span>))<span class="st">×  │         │       ║"</span>)</span>
+<span id="cb23-12"><a href="#cb23-12" aria-hidden="true" tabindex="-1"></a><span class="fu">println</span>(<span class="st">"╚══════════════════════════════════════════════════════════════╝"</span>)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>╔══════════════════════════════════════════════════════════════╗
+║                   Performance Comparison                    ║
+╠══════════════════════════════════════════════════════════════╣
+║ Approach                        │ Time   │ ESS/s(β)│iter/s ║
+╠═════════════════════════════════╪════════╪═════════╪═══════╣
+║ Turing + adjoint sensealg       │301.0s │    4.9 │  7.0  ║
+║ SymSens + codegen + AdvancedHMC │  1.7s │  797.8 │1172.0  ║
+╠═════════════════════════════════╪════════╪═════════╪═══════╣
+║ Speedup                         │  176.0×  │         │       ║
+╚══════════════════════════════════════════════════════════════╝</code></pre>
+</div>
+</div>
+</section>
+<section id="where-does-the-speedup-come-from" class="level2">
+<h2 class="anchored" data-anchor-id="where-does-the-speedup-come-from">Where Does the Speedup Come From?</h2>
+<p>The ~100× speedup has three main sources:</p>
+<ol type="1">
+<li><p><strong>No AD at runtime</strong> (~20×): Instead of propagating ForwardDiff dual numbers through the ODE solver, we solve the symbolically-derived sensitivity equations as a single augmented ODE. The gradient is then a simple dot product of <code>∂ log p / ∂λ</code> with the sensitivity values <code>∂λ / ∂θ</code>.</p></li>
+<li><p><strong>ODEFunction codegen</strong> (~500×): MTK’s <code>ODEFunction(sys)</code> compiles the symbolic system into a raw Julia function. Using this directly with numeric arrays avoids the symbolic parameter remapping that costs ~100ms per <code>remake</code> call in the high-level MTK API.</p></li>
+<li><p><strong>AdvancedHMC directly</strong> (~1.3×): Bypassing Turing’s <code>@model</code> macro and VarInfo tracking removes ~25% overhead. The <code>LogDensityProblems</code> interface gives AdvancedHMC direct access to the log-density and gradient.</p></li>
+</ol>
+<section id="key-insight" class="level3">
+<h3 class="anchored" data-anchor-id="key-insight">Key Insight</h3>
+<p>ModelingToolkit is best used as a <strong>compile-time code generator</strong>, not a runtime parameter-passing framework. The symbolic capabilities (Jacobians, sensitivity equations) are extremely powerful, but the high-level API adds overhead that dominates for fast-evaluating models. Extract the compiled functions and work with raw arrays for maximum performance.</p>
+</section>
+</section>
+
+</main>
+<!-- /main column -->
+<script id="quarto-html-after-body" type="application/javascript">
+  window.document.addEventListener("DOMContentLoaded", function (event) {
+    const icon = "";
+    const anchorJS = new window.AnchorJS();
+    anchorJS.options = {
+      placement: 'right',
+      icon: icon
+    };
+    anchorJS.add('.anchored');
+    const isCodeAnnotation = (el) => {
+      for (const clz of el.classList) {
+        if (clz.startsWith('code-annotation-')) {                     
+          return true;
+        }
+      }
+      return false;
+    }
+    const onCopySuccess = function(e) {
+      // button target
+      const button = e.trigger;
+      // don't keep focus
+      button.blur();
+      // flash "checked"
+      button.classList.add('code-copy-button-checked');
+      var currentTitle = button.getAttribute("title");
+      button.setAttribute("title", "Copied!");
+      let tooltip;
+      if (window.bootstrap) {
+        button.setAttribute("data-bs-toggle", "tooltip");
+        button.setAttribute("data-bs-placement", "left");
+        button.setAttribute("data-bs-title", "Copied!");
+        tooltip = new bootstrap.Tooltip(button, 
+          { trigger: "manual", 
+            customClass: "code-copy-button-tooltip",
+            offset: [0, -8]});
+        tooltip.show();    
+      }
+      setTimeout(function() {
+        if (tooltip) {
+          tooltip.hide();
+          button.removeAttribute("data-bs-title");
+          button.removeAttribute("data-bs-toggle");
+          button.removeAttribute("data-bs-placement");
+        }
+        button.setAttribute("title", currentTitle);
+        button.classList.remove('code-copy-button-checked');
+      }, 1000);
+      // clear code selection
+      e.clearSelection();
+    }
+    const getTextToCopy = function(trigger) {
+      const outerScaffold = trigger.parentElement.cloneNode(true);
+      const codeEl = outerScaffold.querySelector('code');
+      for (const childEl of codeEl.children) {
+        if (isCodeAnnotation(childEl)) {
+          childEl.remove();
+        }
+      }
+      return codeEl.innerText;
+    }
+    const clipboard = new window.ClipboardJS('.code-copy-button:not([data-in-quarto-modal])', {
+      text: getTextToCopy
+    });
+    clipboard.on('success', onCopySuccess);
+    if (window.document.getElementById('quarto-embedded-source-code-modal')) {
+      const clipboardModal = new window.ClipboardJS('.code-copy-button[data-in-quarto-modal]', {
+        text: getTextToCopy,
+        container: window.document.getElementById('quarto-embedded-source-code-modal')
+      });
+      clipboardModal.on('success', onCopySuccess);
+    }
+      var localhostRegex = new RegExp(/^(?:http|https):\/\/localhost\:?[0-9]*\//);
+      var mailtoRegex = new RegExp(/^mailto:/);
+        var filterRegex = new RegExp('/' + window.location.host + '/');
+      var isInternal = (href) => {
+          return filterRegex.test(href) || localhostRegex.test(href) || mailtoRegex.test(href);
+      }
+      // Inspect non-navigation links and adorn them if external
+     var links = window.document.querySelectorAll('a[href]:not(.nav-link):not(.navbar-brand):not(.toc-action):not(.sidebar-link):not(.sidebar-item-toggle):not(.pagination-link):not(.no-external):not([aria-hidden]):not(.dropdown-item):not(.quarto-navigation-tool):not(.about-link)');
+      for (var i=0; i<links.length; i++) {
+        const link = links[i];
+        if (!isInternal(link.href)) {
+          // undo the damage that might have been done by quarto-nav.js in the case of
+          // links that we want to consider external
+          if (link.dataset.originalHref !== undefined) {
+            link.href = link.dataset.originalHref;
+          }
+        }
+      }
+    function tippyHover(el, contentFn, onTriggerFn, onUntriggerFn) {
+      const config = {
+        allowHTML: true,
+        maxWidth: 500,
+        delay: 100,
+        arrow: false,
+        appendTo: function(el) {
+            return el.parentElement;
+        },
+        interactive: true,
+        interactiveBorder: 10,
+        theme: 'quarto',
+        placement: 'bottom-start',
+      };
+      if (contentFn) {
+        config.content = contentFn;
+      }
+      if (onTriggerFn) {
+        config.onTrigger = onTriggerFn;
+      }
+      if (onUntriggerFn) {
+        config.onUntrigger = onUntriggerFn;
+      }
+      window.tippy(el, config); 
+    }
+    const noterefs = window.document.querySelectorAll('a[role="doc-noteref"]');
+    for (var i=0; i<noterefs.length; i++) {
+      const ref = noterefs[i];
+      tippyHover(ref, function() {
+        // use id or data attribute instead here
+        let href = ref.getAttribute('data-footnote-href') || ref.getAttribute('href');
+        try { href = new URL(href).hash; } catch {}
+        const id = href.replace(/^#\/?/, "");
+        const note = window.document.getElementById(id);
+        if (note) {
+          return note.innerHTML;
+        } else {
+          return "";
+        }
+      });
+    }
+    const xrefs = window.document.querySelectorAll('a.quarto-xref');
+    const processXRef = (id, note) => {
+      // Strip column container classes
+      const stripColumnClz = (el) => {
+        el.classList.remove("page-full", "page-columns");
+        if (el.children) {
+          for (const child of el.children) {
+            stripColumnClz(child);
+          }
+        }
+      }
+      stripColumnClz(note)
+      if (id === null || id.startsWith('sec-')) {
+        // Special case sections, only their first couple elements
+        const container = document.createElement("div");
+        if (note.children && note.children.length > 2) {
+          container.appendChild(note.children[0].cloneNode(true));
+          for (let i = 1; i < note.children.length; i++) {
+            const child = note.children[i];
+            if (child.tagName === "P" && child.innerText === "") {
+              continue;
+            } else {
+              container.appendChild(child.cloneNode(true));
+              break;
+            }
+          }
+          if (window.Quarto?.typesetMath) {
+            window.Quarto.typesetMath(container);
+          }
+          return container.innerHTML
+        } else {
+          if (window.Quarto?.typesetMath) {
+            window.Quarto.typesetMath(note);
+          }
+          return note.innerHTML;
+        }
+      } else {
+        // Remove any anchor links if they are present
+        const anchorLink = note.querySelector('a.anchorjs-link');
+        if (anchorLink) {
+          anchorLink.remove();
+        }
+        if (window.Quarto?.typesetMath) {
+          window.Quarto.typesetMath(note);
+        }
+        if (note.classList.contains("callout")) {
+          return note.outerHTML;
+        } else {
+          return note.innerHTML;
+        }
+      }
+    }
+    for (var i=0; i<xrefs.length; i++) {
+      const xref = xrefs[i];
+      tippyHover(xref, undefined, function(instance) {
+        instance.disable();
+        let url = xref.getAttribute('href');
+        let hash = undefined; 
+        if (url.startsWith('#')) {
+          hash = url;
+        } else {
+          try { hash = new URL(url).hash; } catch {}
+        }
+        if (hash) {
+          const id = hash.replace(/^#\/?/, "");
+          const note = window.document.getElementById(id);
+          if (note !== null) {
+            try {
+              const html = processXRef(id, note.cloneNode(true));
+              instance.setContent(html);
+            } finally {
+              instance.enable();
+              instance.show();
+            }
+          } else {
+            // See if we can fetch this
+            fetch(url.split('#')[0])
+            .then(res => res.text())
+            .then(html => {
+              const parser = new DOMParser();
+              const htmlDoc = parser.parseFromString(html, "text/html");
+              const note = htmlDoc.getElementById(id);
+              if (note !== null) {
+                const html = processXRef(id, note);
+                instance.setContent(html);
+              } 
+            }).finally(() => {
+              instance.enable();
+              instance.show();
+            });
+          }
+        } else {
+          // See if we can fetch a full url (with no hash to target)
+          // This is a special case and we should probably do some content thinning / targeting
+          fetch(url)
+          .then(res => res.text())
+          .then(html => {
+            const parser = new DOMParser();
+            const htmlDoc = parser.parseFromString(html, "text/html");
+            const note = htmlDoc.querySelector('main.content');
+            if (note !== null) {
+              // This should only happen for chapter cross references
+              // (since there is no id in the URL)
+              // remove the first header
+              if (note.children.length > 0 && note.children[0].tagName === "HEADER") {
+                note.children[0].remove();
+              }
+              const html = processXRef(null, note);
+              instance.setContent(html);
+            } 
+          }).finally(() => {
+            instance.enable();
+            instance.show();
+          });
+        }
+      }, function(instance) {
+      });
+    }
+        let selectedAnnoteEl;
+        const selectorForAnnotation = ( cell, annotation) => {
+          let cellAttr = 'data-code-cell="' + cell + '"';
+          let lineAttr = 'data-code-annotation="' +  annotation + '"';
+          const selector = 'span[' + cellAttr + '][' + lineAttr + ']';
+          return selector;
+        }
+        const selectCodeLines = (annoteEl) => {
+          const doc = window.document;
+          const targetCell = annoteEl.getAttribute("data-target-cell");
+          const targetAnnotation = annoteEl.getAttribute("data-target-annotation");
+          const annoteSpan = window.document.querySelector(selectorForAnnotation(targetCell, targetAnnotation));
+          const lines = annoteSpan.getAttribute("data-code-lines").split(",");
+          const lineIds = lines.map((line) => {
+            return targetCell + "-" + line;
+          })
+          let top = null;
+          let height = null;
+          let parent = null;
+          if (lineIds.length > 0) {
+              //compute the position of the single el (top and bottom and make a div)
+              const el = window.document.getElementById(lineIds[0]);
+              top = el.offsetTop;
+              height = el.offsetHeight;
+              parent = el.parentElement.parentElement;
+            if (lineIds.length > 1) {
+              const lastEl = window.document.getElementById(lineIds[lineIds.length - 1]);
+              const bottom = lastEl.offsetTop + lastEl.offsetHeight;
+              height = bottom - top;
+            }
+            if (top !== null && height !== null && parent !== null) {
+              // cook up a div (if necessary) and position it 
+              let div = window.document.getElementById("code-annotation-line-highlight");
+              if (div === null) {
+                div = window.document.createElement("div");
+                div.setAttribute("id", "code-annotation-line-highlight");
+                div.style.position = 'absolute';
+                parent.appendChild(div);
+              }
+              div.style.top = top - 2 + "px";
+              div.style.height = height + 4 + "px";
+              div.style.left = 0;
+              let gutterDiv = window.document.getElementById("code-annotation-line-highlight-gutter");
+              if (gutterDiv === null) {
+                gutterDiv = window.document.createElement("div");
+                gutterDiv.setAttribute("id", "code-annotation-line-highlight-gutter");
+                gutterDiv.style.position = 'absolute';
+                const codeCell = window.document.getElementById(targetCell);
+                const gutter = codeCell.querySelector('.code-annotation-gutter');
+                gutter.appendChild(gutterDiv);
+              }
+              gutterDiv.style.top = top - 2 + "px";
+              gutterDiv.style.height = height + 4 + "px";
+            }
+            selectedAnnoteEl = annoteEl;
+          }
+        };
+        const unselectCodeLines = () => {
+          const elementsIds = ["code-annotation-line-highlight", "code-annotation-line-highlight-gutter"];
+          elementsIds.forEach((elId) => {
+            const div = window.document.getElementById(elId);
+            if (div) {
+              div.remove();
+            }
+          });
+          selectedAnnoteEl = undefined;
+        };
+          // Handle positioning of the toggle
+      window.addEventListener(
+        "resize",
+        throttle(() => {
+          elRect = undefined;
+          if (selectedAnnoteEl) {
+            selectCodeLines(selectedAnnoteEl);
+          }
+        }, 10)
+      );
+      function throttle(fn, ms) {
+      let throttle = false;
+      let timer;
+        return (...args) => {
+          if(!throttle) { // first call gets through
+              fn.apply(this, args);
+              throttle = true;
+          } else { // all the others get throttled
+              if(timer) clearTimeout(timer); // cancel #2
+              timer = setTimeout(() => {
+                fn.apply(this, args);
+                timer = throttle = false;
+              }, ms);
+          }
+        };
+      }
+        // Attach click handler to the DT
+        const annoteDls = window.document.querySelectorAll('dt[data-target-cell]');
+        for (const annoteDlNode of annoteDls) {
+          annoteDlNode.addEventListener('click', (event) => {
+            const clickedEl = event.target;
+            if (clickedEl !== selectedAnnoteEl) {
+              unselectCodeLines();
+              const activeEl = window.document.querySelector('dt[data-target-cell].code-annotation-active');
+              if (activeEl) {
+                activeEl.classList.remove('code-annotation-active');
+              }
+              selectCodeLines(clickedEl);
+              clickedEl.classList.add('code-annotation-active');
+            } else {
+              // Unselect the line
+              unselectCodeLines();
+              clickedEl.classList.remove('code-annotation-active');
+            }
+          });
+        }
+    const findCites = (el) => {
+      const parentEl = el.parentElement;
+      if (parentEl) {
+        const cites = parentEl.dataset.cites;
+        if (cites) {
+          return {
+            el,
+            cites: cites.split(' ')
+          };
+        } else {
+          return findCites(el.parentElement)
+        }
+      } else {
+        return undefined;
+      }
+    };
+    var bibliorefs = window.document.querySelectorAll('a[role="doc-biblioref"]');
+    for (var i=0; i<bibliorefs.length; i++) {
+      const ref = bibliorefs[i];
+      const citeInfo = findCites(ref);
+      if (citeInfo) {
+        tippyHover(citeInfo.el, function() {
+          var popup = window.document.createElement('div');
+          citeInfo.cites.forEach(function(cite) {
+            var citeDiv = window.document.createElement('div');
+            citeDiv.classList.add('hanging-indent');
+            citeDiv.classList.add('csl-entry');
+            var biblioDiv = window.document.getElementById('ref-' + cite);
+            if (biblioDiv) {
+              citeDiv.innerHTML = biblioDiv.innerHTML;
+            }
+            popup.appendChild(citeDiv);
+          });
+          return popup.innerHTML;
+        });
+      }
+    }
+  });
+  </script>
+</div> <!-- /content -->
+
+
+
+
+</body></html>
