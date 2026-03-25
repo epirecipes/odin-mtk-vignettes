@@ -4,5 +4,4 @@ vignettes/.quarto/
 vignettes/**/*.quarto_ipynb
 vignettes/**/libs/
 vignettes/Manifest.toml
-*.pdf
 Manifest.toml

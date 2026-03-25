@@ -9,6 +9,8 @@ format:
     toc: true
     theme: cosmo
   gfm: default
+  pdf:
+    toc: true
 
 julia:
   project: "."
