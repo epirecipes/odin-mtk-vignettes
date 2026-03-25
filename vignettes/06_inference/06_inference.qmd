@@ -103,7 +103,12 @@ model = sir_inference(observed, collect(data_times))
 We use the NUTS sampler — Turing.jl's default gradient-based sampler — which is more efficient than the random walk used in R monty.
 
 ```{julia}
-chain = sample(model, NUTS(), 2000; progress=true)
+#| output: false
+using Logging
+chain = with_logger(NullLogger()) do
+    sample(model, NUTS(), 2000; progress=false)
+end
+println("Sampling complete: $(length(chain)) iterations")
 ```
 
 ## Results
