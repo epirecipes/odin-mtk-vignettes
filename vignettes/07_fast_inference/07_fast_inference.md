@@ -454,15 +454,8 @@ axislegend(ax2; position=:rt)
 fig
 ```
 
-<div id="fig-comparison">
+![Figure 1: Posterior distributions from both approaches](07_fast_inference_files/figure-commonmark/fig-comparison-output-1.png)
 
-<img
-src="07_fast_inference_files/figure-commonmark/fig-comparison-output-1.png"
-width="800" height="400" />
-
-Figure 1: Posterior distributions from both approaches
-
-</div>
 
 ## Performance Summary
 
