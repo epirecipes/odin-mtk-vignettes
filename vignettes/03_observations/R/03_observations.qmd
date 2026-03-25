@@ -1,0 +1,79 @@
+---
+title: "Incidence Tracking with zero_every"
+subtitle: "odin2/dust2 Vignette 03 (R)"
+format:
+  html:
+    toc: true
+    code-fold: false
+---
+
+## Introduction
+
+Tracking incidence (new cases per time period) using the `zero_every` feature in odin2.
+
+## Model with Incidence Tracking
+
+```{r}
+library(odin2)
+library(dust2)
+
+sir_inc <- odin({
+  update(S) <- S - n_SI
+  update(I) <- I + n_SI - n_IR
+  update(R) <- R + n_IR
+
+  initial(S) <- N - I0
+  initial(I) <- I0
+  initial(R) <- 0
+
+  initial(incidence, zero_every = 1) <- 0
+  update(incidence) <- incidence + n_SI
+
+  p_SI <- 1 - exp(-beta * I / N * dt)
+  p_IR <- 1 - exp(-gamma * dt)
+  n_SI <- Binomial(S, p_SI)
+  n_IR <- Binomial(I, p_IR)
+
+  beta <- parameter(0.5)
+  gamma <- parameter(0.1)
+  I0 <- parameter(10)
+  N <- parameter(1000)
+})
+```
+
+## Simulation
+
+```{r}
+pars <- list(beta = 0.5, gamma = 0.1, I0 = 10, N = 1000)
+times <- seq(0, 100, by = 1)
+
+sys <- dust_system_create(sir_inc, pars, n_particles = 5, dt = 1, seed = 42)
+dust_system_set_state_initial(sys)
+result <- dust_system_simulate(sys, times)
+```
+
+## Visualising Incidence
+
+```{r}
+par(mfrow = c(2, 1), mar = c(4, 4, 2, 1))
+
+# Prevalence
+cols <- adjustcolor(rainbow(5), alpha.f = 0.5)
+plot(NULL, xlim = range(times), ylim = c(0, max(result[2, , ])),
+     xlab = "Time", ylab = "Count", main = "Prevalence (I)")
+for (i in 1:5) lines(times, result[2, i, ], col = cols[i])
+
+# Incidence
+plot(NULL, xlim = range(times), ylim = c(0, max(result[4, , ])),
+     xlab = "Time", ylab = "Count", main = "Incidence (new cases/day)")
+for (i in 1:5) lines(times, result[4, i, ], col = cols[i])
+```
+
+## Summary
+
+```{r}
+mean_inc <- colMeans(result[4, , ])
+cat("Peak incidence at day:", times[which.max(mean_inc)], "\n")
+cat("Peak mean incidence:", round(max(mean_inc), 1), "\n")
+cat("Cumulative incidence:", round(sum(mean_inc), 1), "\n")
+```

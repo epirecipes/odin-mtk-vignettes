@@ -1,0 +1,109 @@
+---
+title: "Stochastic Discrete-Time SIR"
+subtitle: "ModelingToolkit.jl / JumpProcesses.jl Vignette 02"
+format:
+  html:
+    toc: true
+    code-fold: false
+  gfm:
+    toc: true
+engine: julia
+julia:
+  project: ".."
+---
+
+## Introduction
+
+This vignette demonstrates a stochastic discrete-time SIR model. In the R odin2/dust2 ecosystem, stochastic models use `update()` with `Binomial` draws. Here we implement the equivalent using a direct discrete-time simulation with `Distributions.jl`, then compare against the deterministic ODE solution from ModelingToolkit.jl.
+
+## Model Definition
+
+We define a discrete-time stochastic SIR simulator as a simple function. Each time step, the number of new infections and recoveries are drawn from Binomial distributions.
+
+```{julia}
+using Distributions
+using Random
+using CairoMakie
+using ModelingToolkit
+using DifferentialEquations
+
+function sir_stochastic!(state, pars, dt)
+    S, I, R = state
+    β, γ, N = pars.β, pars.γ, pars.N
+
+    p_SI = 1 - exp(-β * I / N * dt)
+    p_IR = 1 - exp(-γ * dt)
+    n_SI = rand(Binomial(round(Int, S), clamp(p_SI, 0, 1)))
+    n_IR = rand(Binomial(round(Int, I), clamp(p_IR, 0, 1)))
+
+    state[1] = S - n_SI
+    state[2] = I + n_SI - n_IR
+    state[3] = R + n_IR
+    return state
+end
+
+function simulate_stochastic(pars, times; seed=42)
+    rng = Random.seed!(seed)
+    state = [pars.N - pars.I0, Float64(pars.I0), 0.0]
+    dt = times[2] - times[1]
+    result = zeros(3, length(times))
+    result[:, 1] .= state
+    for i in 2:length(times)
+        sir_stochastic!(state, pars, dt)
+        result[:, i] .= state
+    end
+    return result
+end
+```
+
+## Multiple Realisations
+
+```{julia}
+pars = (β=0.5, γ=0.1, I0=10.0, N=1000.0)
+times = collect(0.0:1.0:200.0)
+n_particles = 20
+
+results = [simulate_stochastic(pars, times; seed=42 + i) for i in 1:n_particles]
+
+fig = Figure(size=(700, 400))
+ax = Axis(fig[1, 1]; xlabel="Time", ylabel="Infected",
+          title="Stochastic SIR: $n_particles Realisations")
+for res in results
+    lines!(ax, times, res[2, :]; color=(:red, 0.3))
+end
+fig
+```
+
+## Comparing to Deterministic
+
+```{julia}
+using ModelingToolkit
+using ModelingToolkit: t_nounits as t, D_nounits as D
+using DifferentialEquations
+
+@parameters β_d=0.5 γ_d=0.1 N_d=1000.0
+@variables S_d(t)=990.0 I_d(t)=10.0 R_d(t)=0.0
+
+eqs_det = [
+    D(S_d) ~ -β_d * S_d * I_d / N_d,
+    D(I_d) ~ β_d * S_d * I_d / N_d - γ_d * I_d,
+    D(R_d) ~ γ_d * I_d,
+]
+
+@named sir_det = ODESystem(eqs_det, t)
+sir_det = structural_simplify(sir_det)
+prob = ODEProblem(sir_det, [], (0.0, 200.0))
+sol = solve(prob, Tsit5(); saveat=1.0)
+```
+
+```{julia}
+fig2 = Figure(size=(700, 400))
+ax2 = Axis(fig2[1, 1]; xlabel="Time", ylabel="Infected",
+           title="Stochastic vs Deterministic SIR")
+for res in results
+    lines!(ax2, times, res[2, :]; color=(:lightblue, 0.3))
+end
+lines!(ax2, sol.t, sol[sir_det.I_d]; color=:blue, linewidth=3, label="Deterministic")
+axislegend(ax2; position=:rt)
+fig2
+```

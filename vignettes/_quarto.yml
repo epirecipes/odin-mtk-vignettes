@@ -1,0 +1,14 @@
+project:
+  type: default
+  output-dir: _output
+
+engine: julia
+
+format:
+  html:
+    toc: true
+    theme: cosmo
+  gfm: default
+
+julia:
+  project: "."

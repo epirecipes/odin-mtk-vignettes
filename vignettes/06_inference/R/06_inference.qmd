@@ -1,0 +1,120 @@
+---
+title: "Bayesian Inference with MCMC"
+subtitle: "odin2/dust2/monty Vignette 06 (R)"
+format:
+  html:
+    toc: true
+    code-fold: false
+---
+
+## Introduction
+
+Full Bayesian inference with particle filter + MCMC using odin2/dust2/monty.
+
+## Model and Data
+
+```{r}
+library(odin2)
+library(dust2)
+library(monty)
+
+sir <- odin({
+  update(S) <- S - n_SI
+  update(I) <- I + n_SI - n_IR
+  update(R) <- R + n_IR
+  initial(S) <- N - I0
+  initial(I) <- I0
+  initial(R) <- 0
+  initial(incidence, zero_every = 1) <- 0
+  update(incidence) <- incidence + n_SI
+
+  p_SI <- 1 - exp(-beta * I / N * dt)
+  p_IR <- 1 - exp(-gamma * dt)
+  n_SI <- Binomial(S, p_SI)
+  n_IR <- Binomial(I, p_IR)
+
+  cases <- data()
+  cases ~ Poisson(incidence + 1e-6)
+
+  beta <- parameter(0.5)
+  gamma <- parameter(0.1)
+  I0 <- parameter(10)
+  N <- parameter(1000)
+})
+```
+
+## Generate Synthetic Data
+
+```{r}
+true_pars <- list(beta = 0.5, gamma = 0.1, I0 = 10, N = 1000)
+times <- seq(0, 50, by = 1)
+
+sys <- dust_system_create(sir, true_pars, dt = 1, seed = 1)
+dust_system_set_state_initial(sys)
+obs_result <- dust_system_simulate(sys, times)
+observed <- round(obs_result[4, -1])
+
+data <- data.frame(time = times[-1], cases = observed)
+```
+
+## Set Up Inference
+
+```{r}
+filter <- dust_filter_create(sir, time_start = 0, data = data,
+                             n_particles = 200, seed = 42)
+
+packer <- monty_packer(c("beta", "gamma"),
+                       fixed = list(I0 = 10, N = 1000))
+
+likelihood <- dust_likelihood_monty(filter, packer)
+
+prior <- monty_dsl({
+  beta ~ Gamma(shape = 2, rate = 4)
+  gamma ~ Gamma(shape = 2, rate = 20)
+})
+
+posterior <- likelihood + prior
+```
+
+## Run MCMC
+
+```{r}
+vcv <- matrix(c(0.005, 0, 0, 0.001), 2, 2)
+sampler <- monty_sampler_random_walk(vcv)
+
+samples <- monty_sample(posterior, sampler, 2000, initial = c(0.4, 0.08))
+```
+
+## Results
+
+```{r}
+beta_samples <- samples$pars[1, 500:2000, 1]
+gamma_samples <- samples$pars[2, 500:2000, 1]
+
+cat("β: mean =", round(mean(beta_samples), 3),
+    ", 95% CI = [", round(quantile(beta_samples, 0.025), 3),
+    ",", round(quantile(beta_samples, 0.975), 3), "]\n")
+cat("γ: mean =", round(mean(gamma_samples), 3),
+    ", 95% CI = [", round(quantile(gamma_samples, 0.025), 3),
+    ",", round(quantile(gamma_samples, 0.975), 3), "]\n")
+cat("True: β = 0.5, γ = 0.1\n")
+```
+
+```{r}
+par(mfrow = c(1, 2))
+hist(beta_samples, breaks = 30, main = "Posterior: β", xlab = "β", probability = TRUE)
+abline(v = 0.5, col = "red", lwd = 2)
+
+hist(gamma_samples, breaks = 30, main = "Posterior: γ", xlab = "γ", probability = TRUE)
+abline(v = 0.1, col = "red", lwd = 2)
+```
+
+## Trace Plots
+
+```{r}
+par(mfrow = c(2, 1), mar = c(4, 4, 2, 1))
+plot(beta_samples, type = "l", xlab = "Iteration", ylab = "β", main = "Trace: β")
+abline(h = 0.5, col = "red")
+plot(gamma_samples, type = "l", xlab = "Iteration", ylab = "γ", main = "Trace: γ")
+abline(h = 0.1, col = "red")
+```

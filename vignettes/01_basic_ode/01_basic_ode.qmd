@@ -1,0 +1,97 @@
+---
+title: "Basic ODE Model: SIR"
+subtitle: "ModelingToolkit.jl Vignette 01"
+format:
+  html:
+    toc: true
+    code-fold: false
+  gfm:
+    toc: true
+engine: julia
+julia:
+  project: ".."
+---
+
+## Introduction
+
+This vignette demonstrates how to define and simulate a basic SIR (Susceptible-Infected-Recovered) ordinary differential equation model using [ModelingToolkit.jl](https://docs.sciml.ai/ModelingToolkit/stable/) and [DifferentialEquations.jl](https://docs.sciml.ai/DiffEqDocs/stable/). This is the Julia companion to the R odin2/dust2 vignette in the `R/` subdirectory.
+
+## Model Definition
+
+We define the SIR model using ModelingToolkit's symbolic ODE system interface.
+
+```{julia}
+using ModelingToolkit
+using ModelingToolkit: t_nounits as t, D_nounits as D
+using DifferentialEquations
+using CairoMakie
+
+@parameters β=0.5 γ=0.1 N=1000.0
+@variables S(t)=990.0 I(t)=10.0 R(t)=0.0
+
+eqs = [
+    D(S) ~ -β * S * I / N,
+    D(I) ~ β * S * I / N - γ * I,
+    D(R) ~ γ * I,
+]
+
+@named sir = ODESystem(eqs, t)
+sir = structural_simplify(sir)
+```
+
+## Simulation
+
+```{julia}
+tspan = (0.0, 200.0)
+prob = ODEProblem(sir, [], tspan)
+sol = solve(prob, Tsit5(); saveat=1.0)
+```
+
+## Plot
+
+```{julia}
+fig = Figure(size=(700, 400))
+ax = Axis(fig[1, 1]; xlabel="Time", ylabel="Population", title="SIR ODE Model")
+lines!(ax, sol.t, sol[sir.S]; label="S", color=:blue, linewidth=2)
+lines!(ax, sol.t, sol[sir.I]; label="I", color=:red, linewidth=2)
+lines!(ax, sol.t, sol[sir.R]; label="R", color=:green, linewidth=2)
+axislegend(ax; position=:rc)
+fig
+```
+
+## Parameter Exploration
+
+```{julia}
+betas = [0.3, 0.5, 0.8]
+colors = [:blue, :red, :darkgreen]
+
+fig2 = Figure(size=(700, 400))
+ax2 = Axis(fig2[1, 1]; xlabel="Time", ylabel="Infected",
+           title="Effect of β on Epidemic Dynamics")
+
+for (i, β_val) in enumerate(betas)
+    prob_i = remake(prob; p=[sir.β => β_val])
+    sol_i = solve(prob_i, Tsit5(); saveat=1.0)
+    lines!(ax2, sol_i.t, sol_i[sir.I]; label="β = $β_val",
+           color=colors[i], linewidth=2)
+end
+axislegend(ax2; position=:rt)
+fig2
+```
+
+## Verification
+
+```{julia}
+total = sol[sir.S] .+ sol[sir.I] .+ sol[sir.R]
+println("Population at t=0: ", total[1])
+println("Population at t=200: ", total[end])
+println("Max deviation: ", maximum(abs.(total .- 1000)))
+```
+
+## Final Size
+
+```{julia}
+final_R = sol[sir.R][end]
+println("Final epidemic size: ", round(final_R; digits=1), " out of 1000")
+println("Attack rate: ", round(100 * final_R / 1000; digits=1), "%")
+```

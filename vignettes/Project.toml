@@ -1,0 +1,6 @@
+[deps]
+CairoMakie = "13f3f980-e62b-5c42-98c6-ff1f3baf88f0"
+DifferentialEquations = "0c46a032-eb83-5123-abaf-570d42b7fbaa"
+Distributions = "31c24e10-a181-5473-b8eb-7969acd0382f"
+ModelingToolkit = "961ee093-0014-501f-94e3-6117800e7a78"
+Turing = "fce5fe82-541a-59a6-adf8-730c64b5f9a0"

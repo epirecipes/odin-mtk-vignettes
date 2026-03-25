@@ -1,0 +1,95 @@
+---
+title: "Basic ODE Model: SIR"
+subtitle: "odin2/dust2 Vignette 01 (R)"
+format:
+  html:
+    toc: true
+    code-fold: false
+---
+
+## Introduction
+
+This vignette demonstrates how to define and simulate a basic SIR ordinary differential equation model using the R `odin2`/`dust2` packages. This is the R companion to the Julia vignette.
+
+## Model Definition
+
+```{r}
+library(odin2)
+library(dust2)
+
+sir <- odin({
+  deriv(S) <- -beta * S * I / N
+  deriv(I) <- beta * S * I / N - gamma * I
+  deriv(R) <- gamma * I
+  initial(S) <- N - I0
+  initial(I) <- I0
+  initial(R) <- 0
+  beta <- parameter(0.5)
+  gamma <- parameter(0.1)
+  I0 <- parameter(10)
+  N <- parameter(1000)
+})
+```
+
+## Simulation
+
+```{r}
+pars <- list(beta = 0.5, gamma = 0.1, I0 = 10, N = 1000)
+sys <- dust_system_create(sir, pars, ode_control = dust_ode_control())
+dust_system_set_state_initial(sys)
+times <- seq(0, 200, by = 1)
+result <- dust_system_simulate(sys, times)
+```
+
+## Plot
+
+```{r}
+S <- result[1, ]
+I <- result[2, ]
+R <- result[3, ]
+
+plot(times, S, type = "l", col = "blue", lwd = 2,
+     xlab = "Time", ylab = "Population",
+     main = "SIR ODE Model", ylim = c(0, 1000))
+lines(times, I, col = "red", lwd = 2)
+lines(times, R, col = "green", lwd = 2)
+legend("right", legend = c("S", "I", "R"),
+       col = c("blue", "red", "green"), lwd = 2)
+```
+
+## Parameter Exploration
+
+```{r}
+betas <- c(0.3, 0.5, 0.8)
+cols <- c("blue", "red", "darkgreen")
+
+plot(NULL, xlim = c(0, 200), ylim = c(0, 500),
+     xlab = "Time", ylab = "Infected",
+     main = "Effect of β on Epidemic Dynamics")
+
+for (i in seq_along(betas)) {
+  pars_b <- list(beta = betas[i], gamma = 0.1, I0 = 10, N = 1000)
+  sys_b <- dust_system_create(sir, pars_b, ode_control = dust_ode_control())
+  dust_system_set_state_initial(sys_b)
+  res <- dust_system_simulate(sys_b, times)
+  lines(times, res[2, ], col = cols[i], lwd = 2)
+}
+legend("topright", legend = paste("β =", betas), col = cols, lwd = 2)
+```
+
+## Verification
+
+```{r}
+total <- S + I + R
+cat("Population at t=0:", total[1], "\n")
+cat("Population at t=200:", tail(total, 1), "\n")
+cat("Max deviation:", max(abs(total - 1000)), "\n")
+```
+
+## Final Size
+
+```{r}
+final_R <- tail(R, 1)
+cat("Final epidemic size:", round(final_R, 1), "out of", pars$N, "\n")
+cat("Attack rate:", round(100 * final_R / pars$N, 1), "%\n")
+```
