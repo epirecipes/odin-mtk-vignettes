@@ -1,6 +1,6 @@
 ---
 title: "Fast Bayesian Inference with Symbolic Sensitivities"
-subtitle: "From 171s to 1.5s: Eliminating AD and Framework Overhead"
+subtitle: "Comparing Odin.jl, MTK + Turing, and MTK + Symbolic Sensitivities"
 format:
   html:
     code-fold: false
@@ -15,20 +15,18 @@ julia:
 
 ## Overview
 
-Vignette 06 showed Bayesian inference using Turing.jl's NUTS sampler with ModelingToolkit.jl ODE models. While correct, the naive approach is slow (~170s for 2000 iterations) because:
+This vignette compares four approaches to Bayesian inference for ODE-based epidemic models, from the simplest (Odin.jl) to the most optimised (symbolic sensitivity equations with MTK codegen):
 
-1. **Automatic differentiation through the ODE solver** (~65ms per gradient)
-2. **MTK's symbolic `remake` overhead** (~100ms per parameter update)
-3. **Turing's model infrastructure overhead** (~25% of total)
+1. **Odin.jl + NUTS** — the simplest high-performance option
+2. **Odin.jl + RW-MCMC** — gradient-free baseline
+3. **Turing.jl + MTK** — the standard Julia ecosystem approach
+4. **Symbolic sensitivities + ODEFunction codegen** — maximum MTK performance
 
-This vignette demonstrates three progressively faster approaches, culminating in a **~110× speedup** by combining:
-
-- **Symbolic sensitivity equations** (no AD at runtime)
-- **MTK's `ODEFunction` codegen** (compiled parameter handling)
-- **AdvancedHMC.jl via LogDensityProblems** (minimal sampler overhead)
+The naive Turing + MTK approach is slow (~170s for 2000 NUTS iterations) because of AD through the solver (~65ms), `remake` overhead (~100ms), and Turing infrastructure (~25%). We show how to eliminate each bottleneck.
 
 ```{julia}
 #| output: false
+using Odin
 using ModelingToolkit
 using ModelingToolkit: t_nounits as t, D_nounits as D
 using Symbolics
@@ -46,7 +44,7 @@ using CairoMakie
 
 ## Model and Data
 
-We use the same SIR model and synthetic data as vignette 06.
+We use the same SIR model and synthetic data throughout all approaches.
 
 ```{julia}
 @parameters β=0.5 γ=0.1 N_pop=1000.0
@@ -60,6 +58,7 @@ eqs = [
 
 @named sir = ODESystem(eqs, t)
 sir_s = structural_simplify(sir)
+println("SIR model: $(length(unknowns(sir_s))) unknowns, $(length(parameters(sir_s))) parameters")
 ```
 
 ```{julia}
@@ -98,9 +97,102 @@ function ess_ipse(x)
 end
 ```
 
-## Approach 1: Turing.jl + ForwardDiff (Baseline)
+## Approach 1: Odin.jl + NUTS
 
-The standard approach: define a `@model`, let Turing differentiate through the ODE solve with ForwardDiff.
+Odin.jl provides a pure Julia implementation of the odin2/dust2/monty framework with
+built-in gradient support via ForwardDiff. The DSL compiles to a type-stable Julia ODE
+system with zero framework overhead.
+
+```{julia}
+sir_odin = @odin begin
+    deriv(S) = -beta * S * I / N
+    deriv(I) = beta * S * I / N - gamma * I
+    deriv(R) = gamma * I
+    initial(S) = N - I0
+    initial(I) = I0
+    initial(R) = 0.0
+    N = parameter(1000.0)
+    I0 = parameter(10.0)
+    beta = parameter(0.5)
+    gamma = parameter(0.1)
+    cases_lambda = I > 0 ? I : 1e-10
+    cases ~ Poisson(cases_lambda)
+end
+
+# Prepare data for Odin.jl
+odin_data = [(time=Float64(i), cases=Float64(obs[i])) for i in eachindex(obs)]
+fdata = dust_filter_data(odin_data; time_field=:time)
+
+# Create unfilter (deterministic likelihood)
+uf = dust_unfilter_create(sir_odin, fdata; ode_control=DustODEControl(atol=1e-8, rtol=1e-8))
+
+# Packer and likelihood
+packer = monty_packer([:beta, :gamma]; fixed=(I0=10.0, N=1000.0))
+ll_odin = dust_likelihood_monty(uf, packer)
+
+# Prior
+prior_odin = @monty_prior begin
+    beta ~ Gamma(2.0, 0.25)
+    gamma ~ Gamma(2.0, 0.05)
+end
+
+posterior_odin = ll_odin + prior_odin
+```
+
+```{julia}
+sampler_nuts = monty_sampler_nuts(target_acceptance=0.8, n_adaption=500)
+initial_odin = [0.4 0.4; 0.08 0.08]
+
+# Warmup
+_ = monty_sample(posterior_odin, sampler_nuts, 100;
+    n_chains=2, initial=initial_odin, seed=42)
+
+# Timed run
+t_odin_nuts = @timed begin
+    s_odin_nuts = monty_sample(posterior_odin, sampler_nuts, 2000;
+        n_chains=1, initial=reshape([0.4, 0.08], 2, 1), n_burnin=500, seed=123)
+end
+
+b_odin_nuts = vec(s_odin_nuts.pars[1, :, 1])
+g_odin_nuts = vec(s_odin_nuts.pars[2, :, 1])
+
+println("Approach 1: Odin.jl + NUTS")
+println("  Time:     $(round(t_odin_nuts.time; digits=2))s")
+println("  β:        $(round(mean(b_odin_nuts); digits=4)) ± $(round(std(b_odin_nuts); digits=4))")
+println("  γ:        $(round(mean(g_odin_nuts); digits=4)) ± $(round(std(g_odin_nuts); digits=4))")
+println("  ESS/s(β): $(round(ess_ipse(b_odin_nuts)/t_odin_nuts.time; digits=1))")
+println("  iter/s:   $(round(2000/t_odin_nuts.time; digits=0))")
+```
+
+## Approach 2: Odin.jl + RW-MCMC
+
+Random walk MCMC requires no gradients and is extremely fast per iteration, though with lower per-iteration efficiency.
+
+```{julia}
+sampler_rw = monty_sampler_random_walk([0.005 0.0; 0.0 0.001])
+
+# Warmup
+_ = monty_sample(posterior_odin, sampler_rw, 100;
+    n_chains=1, initial=reshape([0.4, 0.08], 2, 1), seed=42)
+
+# Timed run
+t_odin_rw = @timed begin
+    s_odin_rw = monty_sample(posterior_odin, sampler_rw, 5000;
+        n_chains=1, initial=reshape([0.4, 0.08], 2, 1), n_burnin=1000, seed=456)
+end
+
+b_odin_rw = vec(s_odin_rw.pars[1, :, 1])
+g_odin_rw = vec(s_odin_rw.pars[2, :, 1])
+
+println("Approach 2: Odin.jl + RW-MCMC")
+println("  Time:     $(round(t_odin_rw.time; digits=3))s")
+println("  β:        $(round(mean(b_odin_rw); digits=4)) ± $(round(std(b_odin_rw); digits=4))")
+println("  γ:        $(round(mean(g_odin_rw); digits=4)) ± $(round(std(g_odin_rw); digits=4))")
+println("  ESS/s(β): $(round(ess_ipse(b_odin_rw)/t_odin_rw.time; digits=1))")
+println("  iter/s:   $(round(5000/t_odin_rw.time; digits=0))")
+```
+
+## Approach 3: Turing.jl + MTK (Baseline)
 
 ```{julia}
 sa = InterpolatingAdjoint(autojacvec=EnzymeVJP())
@@ -140,7 +232,7 @@ burnin = 500
 b1 = vec(ch1[:be])[burnin+1:end]
 g1 = vec(ch1[:ge])[burnin+1:end]
 
-println("Approach 1: Turing + adjoint sensealg")
+println("Approach 3: Turing + adjoint sensealg")
 println("  Time:     $(round(t1.time; digits=1))s")
 println("  β:        $(round(mean(b1); digits=4)) ± $(round(std(b1); digits=4))")
 println("  γ:        $(round(mean(g1); digits=4)) ± $(round(std(g1); digits=4))")
@@ -149,7 +241,7 @@ println("  ESS/s(γ): $(round(ess_ipse(g1)/t1.time; digits=1))")
 println("  iter/s:   $(round(2000/t1.time; digits=0))")
 ```
 
-## Approach 2: Symbolic Sensitivity Equations
+## Approach 4: Symbolic Sensitivity Equations
 
 Instead of using AD to differentiate through the ODE solver, we derive the
 **forward sensitivity equations** symbolically. For parameters $\theta = (\beta, \gamma)$
@@ -175,10 +267,8 @@ f_rhs = [-β_s * S_s * I_s / N_s,
 J_fy = Symbolics.jacobian(f_rhs, [S_s, I_s, R_s])
 F_fθ = Symbolics.jacobian(f_rhs, [β_s, γ_s])
 
-println("∂f/∂y (Jacobian):")
-display(J_fy)
-println("\n∂f/∂θ:")
-display(F_fθ)
+println("∂f/∂y (Jacobian): $(size(J_fy))")
+println("∂f/∂θ: $(size(F_fθ))")
 ```
 
 ### Building the Augmented ODE
@@ -341,7 +431,7 @@ end
 b2 = [exp(chain2[i].z.θ[1]) for i in burnin+1:length(chain2)]
 g2 = [exp(chain2[i].z.θ[2]) for i in burnin+1:length(chain2)]
 
-println("Approach 2: SymSens + ODEFunction codegen + AdvancedHMC")
+println("Approach 4: SymSens + ODEFunction codegen + AdvancedHMC")
 println("  Time:     $(round(t2.time; digits=2))s")
 println("  β:        $(round(mean(b2); digits=4)) ± $(round(std(b2); digits=4))")
 println("  γ:        $(round(mean(g2); digits=4)) ± $(round(std(g2); digits=4))")
@@ -354,19 +444,23 @@ println("  iter/s:   $(round(2000/t2.time; digits=0))")
 
 ```{julia}
 #| label: fig-comparison
-#| fig-cap: "Posterior distributions from both approaches"
+#| fig-cap: "Posterior distributions from all four approaches"
 
 fig = Figure(size=(800, 400))
 
 ax1 = Axis(fig[1, 1]; xlabel="β", ylabel="Density", title="Posterior: β")
-hist!(ax1, b1; bins=40, color=(:steelblue, 0.5), normalization=:pdf, label="Turing ($(round(t1.time; digits=0))s)")
-hist!(ax1, b2; bins=40, color=(:orange, 0.5), normalization=:pdf, label="SymSens ($(round(t2.time; digits=1))s)")
+hist!(ax1, b_odin_nuts; bins=40, color=(:green, 0.4), normalization=:pdf, label="Odin NUTS")
+hist!(ax1, b_odin_rw; bins=40, color=(:purple, 0.3), normalization=:pdf, label="Odin RW")
+hist!(ax1, b1; bins=40, color=(:steelblue, 0.3), normalization=:pdf, label="Turing NUTS")
+hist!(ax1, b2; bins=40, color=(:orange, 0.3), normalization=:pdf, label="SymSens NUTS")
 vlines!(ax1, [0.5]; color=:red, linestyle=:dash, label="Truth")
 axislegend(ax1; position=:rt)
 
 ax2 = Axis(fig[1, 2]; xlabel="γ", ylabel="Density", title="Posterior: γ")
-hist!(ax2, g1; bins=40, color=(:steelblue, 0.5), normalization=:pdf, label="Turing")
-hist!(ax2, g2; bins=40, color=(:orange, 0.5), normalization=:pdf, label="SymSens")
+hist!(ax2, g_odin_nuts; bins=40, color=(:green, 0.4), normalization=:pdf, label="Odin NUTS")
+hist!(ax2, g_odin_rw; bins=40, color=(:purple, 0.3), normalization=:pdf, label="Odin RW")
+hist!(ax2, g1; bins=40, color=(:steelblue, 0.3), normalization=:pdf, label="Turing NUTS")
+hist!(ax2, g2; bins=40, color=(:orange, 0.3), normalization=:pdf, label="SymSens NUTS")
 vlines!(ax2, [0.1]; color=:red, linestyle=:dash, label="Truth")
 axislegend(ax2; position=:rt)
 
@@ -376,42 +470,64 @@ fig
 ## Performance Summary
 
 ```{julia}
-speedup = round(t1.time / t2.time; digits=0)
+#| echo: false
+#| output: asis
 
-println("╔══════════════════════════════════════════════════════════════╗")
-println("║                   Performance Comparison                    ║")
-println("╠══════════════════════════════════════════════════════════════╣")
-println("║ Approach                        │ Time   │ ESS/s(β)│iter/s ║")
-println("╠═════════════════════════════════╪════════╪═════════╪═══════╣")
-println("║ Turing + adjoint sensealg       │$(lpad(round(t1.time;digits=0),5))s │$(lpad(round(ess_ipse(b1)/t1.time;digits=1),7)) │$(lpad(round(2000/t1.time;digits=0),5))  ║")
-println("║ SymSens + codegen + AdvancedHMC │$(lpad(round(t2.time;digits=1),5))s │$(lpad(round(ess_ipse(b2)/t2.time;digits=1),7)) │$(lpad(round(2000/t2.time;digits=0),5))  ║")
-println("╠═════════════════════════════════╪════════╪═════════╪═══════╣")
-println("║ Speedup                         │  $(lpad(speedup,3))×  │         │       ║")
-println("╚══════════════════════════════════════════════════════════════╝")
+n_rw = 5000
+n_nuts = 2000
+
+rows = [
+    ("Odin.jl NUTS", n_nuts, t_odin_nuts.time, b_odin_nuts, g_odin_nuts),
+    ("Odin.jl RW-MCMC", n_rw, t_odin_rw.time, b_odin_rw, g_odin_rw),
+    ("Turing + MTK NUTS", n_nuts, t1.time, b1, g1),
+    ("SymSens + codegen NUTS", n_nuts, t2.time, b2, g2),
+]
+
+println("| Approach | Sampler | Iters | Time (s) | β (mean ± sd) | γ (mean ± sd) | ESS/s(β) | iter/s |")
+println("|----------|---------|------:|----------:|-------------:|-------------:|---------:|-------:|")
+for (name, ni, ti, bi, gi) in rows
+    ess_b = ess_ipse(bi) / ti
+    iters = ni / ti
+    bm = round(mean(bi); digits=4)
+    bs = round(std(bi); digits=4)
+    gm = round(mean(gi); digits=4)
+    gs = round(std(gi); digits=4)
+    sampler = contains(name, "RW") ? "RW" : "NUTS"
+    println("| $name | $sampler | $ni | $(round(ti; digits=2)) | $bm ± $bs | $gm ± $gs | $(round(ess_b; digits=1)) | $(round(iters; digits=0)) |")
+end
+
+speedup_turing = round(t1.time / t_odin_nuts.time; digits=0)
+speedup_symsens = round(t1.time / t2.time; digits=0)
+println("\nOdin.jl NUTS is **$(speedup_turing)×** faster than Turing + MTK NUTS.")
+println("SymSens + codegen NUTS is **$(speedup_symsens)×** faster than Turing + MTK NUTS.")
 ```
 
 ## Where Does the Speedup Come From?
 
-The ~100× speedup has three main sources:
+The performance differences have several sources:
 
-1. **No AD at runtime** (~20×): Instead of propagating ForwardDiff dual numbers
+1. **Odin.jl** compiles the DSL directly to a tight Julia ODE function with no symbolic
+   overhead. ForwardDiff through this minimal code path is fast (~0.5ms/iteration for NUTS).
+   RW-MCMC is even faster since it needs no gradient at all.
+
+2. **No AD at runtime** (SymSens, ~20×): Instead of propagating ForwardDiff dual numbers
    through the ODE solver, we solve the symbolically-derived sensitivity equations
    as a single augmented ODE. The gradient is then a simple dot product of
    `∂ log p / ∂λ` with the sensitivity values `∂λ / ∂θ`.
 
-2. **ODEFunction codegen** (~500×): MTK's `ODEFunction(sys)` compiles the symbolic
+3. **ODEFunction codegen** (SymSens, ~500×): MTK's `ODEFunction(sys)` compiles the symbolic
    system into a raw Julia function. Using this directly with numeric arrays avoids
    the symbolic parameter remapping that costs ~100ms per `remake` call in the
    high-level MTK API.
 
-3. **AdvancedHMC directly** (~1.3×): Bypassing Turing's `@model` macro and VarInfo
+4. **AdvancedHMC directly** (~1.3×): Bypassing Turing's `@model` macro and VarInfo
    tracking removes ~25% overhead. The `LogDensityProblems` interface gives
    AdvancedHMC direct access to the log-density and gradient.
 
 ### Key Insight
 
-ModelingToolkit is best used as a **compile-time code generator**, not a runtime
-parameter-passing framework. The symbolic capabilities (Jacobians, sensitivity equations)
-are extremely powerful, but the high-level API adds overhead that dominates for
-fast-evaluating models. Extract the compiled functions and work with raw arrays
-for maximum performance.
+For fast-evaluating models like SIR, **framework overhead dominates compute time**.
+Odin.jl eliminates this by design — the DSL compiles to plain Julia with no symbolic
+layer at runtime. For MTK users, the key is to use `ODEFunction(sys)` to extract
+compiled functions and work with raw arrays, rather than using the high-level API
+at every MCMC iteration.

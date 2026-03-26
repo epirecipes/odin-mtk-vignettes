@@ -4,10 +4,12 @@
 - [Overview](#overview)
 - [Model and Data](#model-and-data)
   - [ESS Helper](#ess-helper)
-- [Approach 1: Turing.jl + ForwardDiff
-  (Baseline)](#approach-1-turingjl--forwarddiff-baseline)
-- [Approach 2: Symbolic Sensitivity
-  Equations](#approach-2-symbolic-sensitivity-equations)
+- [Approach 1: Odin.jl + NUTS](#approach-1-odinjl--nuts)
+- [Approach 2: Odin.jl + RW-MCMC](#approach-2-odinjl--rw-mcmc)
+- [Approach 3: Turing.jl + MTK
+  (Baseline)](#approach-3-turingjl--mtk-baseline)
+- [Approach 4: Symbolic Sensitivity
+  Equations](#approach-4-symbolic-sensitivity-equations)
   - [Deriving the Augmented System](#deriving-the-augmented-system)
   - [Building the Augmented ODE](#building-the-augmented-ode)
   - [Using ODEFunction Codegen](#using-odefunction-codegen)
@@ -21,23 +23,23 @@
 
 ## Overview
 
-Vignette 06 showed Bayesian inference using Turing.jl’s NUTS sampler
-with ModelingToolkit.jl ODE models. While correct, the naive approach is
-slow (~170s for 2000 iterations) because:
+This vignette compares four approaches to Bayesian inference for
+ODE-based epidemic models, from the simplest (Odin.jl) to the most
+optimised (symbolic sensitivity equations with MTK codegen):
 
-1.  **Automatic differentiation through the ODE solver** (~65ms per
-    gradient)
-2.  **MTK’s symbolic `remake` overhead** (~100ms per parameter update)
-3.  **Turing’s model infrastructure overhead** (~25% of total)
+1.  **Odin.jl + NUTS** — the simplest high-performance option
+2.  **Odin.jl + RW-MCMC** — gradient-free baseline
+3.  **Turing.jl + MTK** — the standard Julia ecosystem approach
+4.  **Symbolic sensitivities + ODEFunction codegen** — maximum MTK
+    performance
 
-This vignette demonstrates three progressively faster approaches,
-culminating in a **~110× speedup** by combining:
-
-- **Symbolic sensitivity equations** (no AD at runtime)
-- **MTK’s `ODEFunction` codegen** (compiled parameter handling)
-- **AdvancedHMC.jl via LogDensityProblems** (minimal sampler overhead)
+The naive Turing + MTK approach is slow (~170s for 2000 NUTS iterations)
+because of AD through the solver (~65ms), `remake` overhead (~100ms),
+and Turing infrastructure (~25%). We show how to eliminate each
+bottleneck.
 
 ``` julia
+using Odin
 using ModelingToolkit
 using ModelingToolkit: t_nounits as t, D_nounits as D
 using Symbolics
@@ -55,7 +57,7 @@ using CairoMakie
 
 ## Model and Data
 
-We use the same SIR model and synthetic data as vignette 06.
+We use the same SIR model and synthetic data throughout all approaches.
 
 ``` julia
 @parameters β=0.5 γ=0.1 N_pop=1000.0
@@ -69,19 +71,10 @@ eqs = [
 
 @named sir = ODESystem(eqs, t)
 sir_s = structural_simplify(sir)
+println("SIR model: $(length(unknowns(sir_s))) unknowns, $(length(parameters(sir_s))) parameters")
 ```
 
-    Model sir:
-    Equations (3):
-      3 standard: see equations(sir)
-    Unknowns (3): see unknowns(sir)
-      R(t)
-      I(t)
-      S(t)
-    Parameters (3): see parameters(sir)
-      β
-      N_pop
-      γ
+    SIR model: 3 unknowns, 3 parameters
 
 ``` julia
 prob_base = ODEProblem(sir_s, [], (0.0, 50.0),
@@ -102,7 +95,7 @@ println("Generated $(length(obs)) observations, range: $(extrema(obs))")
     │ else
     │     Dict(unknowns(sys) .=> u0)
     │ end, Dict(p)), tspan)` instead.
-    └ @ ModelingToolkitBase ~/.julia/packages/ModelingToolkitBase/uIKoY/src/deprecations.jl:53
+    └ @ ModelingToolkit ~/.julia/packages/ModelingToolkit/JvjlW/src/deprecations.jl:45
     Generated 50 observations, range: (14, 483)
 
 ### ESS Helper
@@ -131,10 +124,131 @@ end
 
     ess_ipse (generic function with 1 method)
 
-## Approach 1: Turing.jl + ForwardDiff (Baseline)
+## Approach 1: Odin.jl + NUTS
 
-The standard approach: define a `@model`, let Turing differentiate
-through the ODE solve with ForwardDiff.
+Odin.jl provides a pure Julia implementation of the odin2/dust2/monty
+framework with built-in gradient support via ForwardDiff. The DSL
+compiles to a type-stable Julia ODE system with zero framework overhead.
+
+``` julia
+sir_odin = @odin begin
+    deriv(S) = -beta * S * I / N
+    deriv(I) = beta * S * I / N - gamma * I
+    deriv(R) = gamma * I
+    initial(S) = N - I0
+    initial(I) = I0
+    initial(R) = 0.0
+    N = parameter(1000.0)
+    I0 = parameter(10.0)
+    beta = parameter(0.5)
+    gamma = parameter(0.1)
+    cases_lambda = I > 0 ? I : 1e-10
+    cases ~ Poisson(cases_lambda)
+end
+
+# Prepare data for Odin.jl
+odin_data = [(time=Float64(i), cases=Float64(obs[i])) for i in eachindex(obs)]
+fdata = dust_filter_data(odin_data; time_field=:time)
+
+# Create unfilter (deterministic likelihood)
+uf = dust_unfilter_create(sir_odin, fdata; ode_control=DustODEControl(atol=1e-8, rtol=1e-8))
+
+# Packer and likelihood
+packer = monty_packer([:beta, :gamma]; fixed=(I0=10.0, N=1000.0))
+ll_odin = dust_likelihood_monty(uf, packer)
+
+# Prior
+prior_odin = @monty_prior begin
+    beta ~ Gamma(2.0, 0.25)
+    gamma ~ Gamma(2.0, 0.05)
+end
+
+posterior_odin = ll_odin + prior_odin
+```
+
+    MontyModel{Odin.var"#monty_model_combine##0#monty_model_combine##1"{MontyModel{Odin.var"#dust_likelihood_monty##2#dust_likelihood_monty##3"{DustUnfilter{var"##OdinModel#278", @NamedTuple{cases::Float64}}, MontyPacker}, Odin.var"#dust_likelihood_monty##4#dust_likelihood_monty##5"{Odin.var"#dust_likelihood_monty##2#dust_likelihood_monty##3"{DustUnfilter{var"##OdinModel#278", @NamedTuple{cases::Float64}}, MontyPacker}}, Nothing, Nothing}, MontyModel{var"#11#12", var"#13#14"{var"#11#12"}, var"#15#16", Matrix{Float64}}}, Odin.var"#monty_model_combine##2#monty_model_combine##3"{MontyModel{Odin.var"#dust_likelihood_monty##2#dust_likelihood_monty##3"{DustUnfilter{var"##OdinModel#278", @NamedTuple{cases::Float64}}, MontyPacker}, Odin.var"#dust_likelihood_monty##4#dust_likelihood_monty##5"{Odin.var"#dust_likelihood_monty##2#dust_likelihood_monty##3"{DustUnfilter{var"##OdinModel#278", @NamedTuple{cases::Float64}}, MontyPacker}}, Nothing, Nothing}, MontyModel{var"#11#12", var"#13#14"{var"#11#12"}, var"#15#16", Matrix{Float64}}}, Nothing, Matrix{Float64}}(["beta", "gamma"], Odin.var"#monty_model_combine##0#monty_model_combine##1"{MontyModel{Odin.var"#dust_likelihood_monty##2#dust_likelihood_monty##3"{DustUnfilter{var"##OdinModel#278", @NamedTuple{cases::Float64}}, MontyPacker}, Odin.var"#dust_likelihood_monty##4#dust_likelihood_monty##5"{Odin.var"#dust_likelihood_monty##2#dust_likelihood_monty##3"{DustUnfilter{var"##OdinModel#278", @NamedTuple{cases::Float64}}, MontyPacker}}, Nothing, Nothing}, MontyModel{var"#11#12", var"#13#14"{var"#11#12"}, var"#15#16", Matrix{Float64}}}(MontyModel{Odin.var"#dust_likelihood_monty##2#dust_likelihood_monty##3"{DustUnfilter{var"##OdinModel#278", @NamedTuple{cases::Float64}}, MontyPacker}, Odin.var"#dust_likelihood_monty##4#dust_likelihood_monty##5"{Odin.var"#dust_likelihood_monty##2#dust_likelihood_monty##3"{DustUnfilter{var"##OdinModel#278", @NamedTuple{cases::Float64}}, MontyPacker}}, Nothing, Nothing}(["beta", "gamma"], Odin.var"#dust_likelihood_monty##2#dust_likelihood_monty##3"{DustUnfilter{var"##OdinModel#278", @NamedTuple{cases::Float64}}, MontyPacker}(DustUnfilter{var"##OdinModel#278", @NamedTuple{cases::Float64}}(DustSystemGenerator{var"##OdinModel#278"}(var"##OdinModel#278"(3, [:S, :I, :R], [:N, :I0, :beta, :gamma], true, false, true, false, false, Dict{Symbol, Array}())), FilterData{@NamedTuple{cases::Float64}}([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0  …  41.0, 42.0, 43.0, 44.0, 45.0, 46.0, 47.0, 48.0, 49.0, 50.0], [(cases = 14.0,), (cases = 24.0,), (cases = 27.0,), (cases = 54.0,), (cases = 69.0,), (cases = 112.0,), (cases = 123.0,), (cases = 175.0,), (cases = 252.0,), (cases = 302.0,)  …  (cases = 74.0,), (cases = 51.0,), (cases = 47.0,), (cases = 52.0,), (cases = 47.0,), (cases = 36.0,), (cases = 23.0,), (cases = 36.0,), (cases = 29.0,), (cases = 28.0,)]), 0.0, DustODEControl(1.0e-8, 1.0e-8, 10000, :dp5), [0.0, 0.0, 0.0], Xoshiro(0xcf5a312a7b0dd4ca, 0xccd8c80273c5fe6c, 0xafac7c30d8d5cf73, 0x40d17d77842a984e, 0x69fd646aafb7076f), nothing, nothing, nothing, [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0  …  41.0, 42.0, 43.0, 44.0, 45.0, 46.0, 47.0, 48.0, 49.0, 50.0]), MontyPacker([:beta, :gamma], [:beta, :gamma], Symbol[], Dict{Symbol, Tuple}(), Dict{Symbol, UnitRange{Int64}}(:beta => 1:1, :gamma => 2:2), 2, (I0 = 10.0, N = 1000.0), nothing)), Odin.var"#dust_likelihood_monty##4#dust_likelihood_monty##5"{Odin.var"#dust_likelihood_monty##2#dust_likelihood_monty##3"{DustUnfilter{var"##OdinModel#278", @NamedTuple{cases::Float64}}, MontyPacker}}(Odin.var"#dust_likelihood_monty##2#dust_likelihood_monty##3"{DustUnfilter{var"##OdinModel#278", @NamedTuple{cases::Float64}}, MontyPacker}(DustUnfilter{var"##OdinModel#278", @NamedTuple{cases::Float64}}(DustSystemGenerator{var"##OdinModel#278"}(var"##OdinModel#278"(3, [:S, :I, :R], [:N, :I0, :beta, :gamma], true, false, true, false, false, Dict{Symbol, Array}())), FilterData{@NamedTuple{cases::Float64}}([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0  …  41.0, 42.0, 43.0, 44.0, 45.0, 46.0, 47.0, 48.0, 49.0, 50.0], [(cases = 14.0,), (cases = 24.0,), (cases = 27.0,), (cases = 54.0,), (cases = 69.0,), (cases = 112.0,), (cases = 123.0,), (cases = 175.0,), (cases = 252.0,), (cases = 302.0,)  …  (cases = 74.0,), (cases = 51.0,), (cases = 47.0,), (cases = 52.0,), (cases = 47.0,), (cases = 36.0,), (cases = 23.0,), (cases = 36.0,), (cases = 29.0,), (cases = 28.0,)]), 0.0, DustODEControl(1.0e-8, 1.0e-8, 10000, :dp5), [0.0, 0.0, 0.0], Xoshiro(0xcf5a312a7b0dd4ca, 0xccd8c80273c5fe6c, 0xafac7c30d8d5cf73, 0x40d17d77842a984e, 0x69fd646aafb7076f), nothing, nothing, nothing, [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0  …  41.0, 42.0, 43.0, 44.0, 45.0, 46.0, 47.0, 48.0, 49.0, 50.0]), MontyPacker([:beta, :gamma], [:beta, :gamma], Symbol[], Dict{Symbol, Tuple}(), Dict{Symbol, UnitRange{Int64}}(:beta => 1:1, :gamma => 2:2), 2, (I0 = 10.0, N = 1000.0), nothing))), nothing, nothing, Odin.MontyModelProperties(true, false, false, false)), MontyModel{var"#11#12", var"#13#14"{var"#11#12"}, var"#15#16", Matrix{Float64}}(["beta", "gamma"], var"#11#12"(), var"#13#14"{var"#11#12"}(var"#11#12"()), var"#15#16"(), [0.0 Inf; 0.0 Inf], Odin.MontyModelProperties(true, true, false, false))), Odin.var"#monty_model_combine##2#monty_model_combine##3"{MontyModel{Odin.var"#dust_likelihood_monty##2#dust_likelihood_monty##3"{DustUnfilter{var"##OdinModel#278", @NamedTuple{cases::Float64}}, MontyPacker}, Odin.var"#dust_likelihood_monty##4#dust_likelihood_monty##5"{Odin.var"#dust_likelihood_monty##2#dust_likelihood_monty##3"{DustUnfilter{var"##OdinModel#278", @NamedTuple{cases::Float64}}, MontyPacker}}, Nothing, Nothing}, MontyModel{var"#11#12", var"#13#14"{var"#11#12"}, var"#15#16", Matrix{Float64}}}(MontyModel{Odin.var"#dust_likelihood_monty##2#dust_likelihood_monty##3"{DustUnfilter{var"##OdinModel#278", @NamedTuple{cases::Float64}}, MontyPacker}, Odin.var"#dust_likelihood_monty##4#dust_likelihood_monty##5"{Odin.var"#dust_likelihood_monty##2#dust_likelihood_monty##3"{DustUnfilter{var"##OdinModel#278", @NamedTuple{cases::Float64}}, MontyPacker}}, Nothing, Nothing}(["beta", "gamma"], Odin.var"#dust_likelihood_monty##2#dust_likelihood_monty##3"{DustUnfilter{var"##OdinModel#278", @NamedTuple{cases::Float64}}, MontyPacker}(DustUnfilter{var"##OdinModel#278", @NamedTuple{cases::Float64}}(DustSystemGenerator{var"##OdinModel#278"}(var"##OdinModel#278"(3, [:S, :I, :R], [:N, :I0, :beta, :gamma], true, false, true, false, false, Dict{Symbol, Array}())), FilterData{@NamedTuple{cases::Float64}}([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0  …  41.0, 42.0, 43.0, 44.0, 45.0, 46.0, 47.0, 48.0, 49.0, 50.0], [(cases = 14.0,), (cases = 24.0,), (cases = 27.0,), (cases = 54.0,), (cases = 69.0,), (cases = 112.0,), (cases = 123.0,), (cases = 175.0,), (cases = 252.0,), (cases = 302.0,)  …  (cases = 74.0,), (cases = 51.0,), (cases = 47.0,), (cases = 52.0,), (cases = 47.0,), (cases = 36.0,), (cases = 23.0,), (cases = 36.0,), (cases = 29.0,), (cases = 28.0,)]), 0.0, DustODEControl(1.0e-8, 1.0e-8, 10000, :dp5), [0.0, 0.0, 0.0], Xoshiro(0xcf5a312a7b0dd4ca, 0xccd8c80273c5fe6c, 0xafac7c30d8d5cf73, 0x40d17d77842a984e, 0x69fd646aafb7076f), nothing, nothing, nothing, [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0  …  41.0, 42.0, 43.0, 44.0, 45.0, 46.0, 47.0, 48.0, 49.0, 50.0]), MontyPacker([:beta, :gamma], [:beta, :gamma], Symbol[], Dict{Symbol, Tuple}(), Dict{Symbol, UnitRange{Int64}}(:beta => 1:1, :gamma => 2:2), 2, (I0 = 10.0, N = 1000.0), nothing)), Odin.var"#dust_likelihood_monty##4#dust_likelihood_monty##5"{Odin.var"#dust_likelihood_monty##2#dust_likelihood_monty##3"{DustUnfilter{var"##OdinModel#278", @NamedTuple{cases::Float64}}, MontyPacker}}(Odin.var"#dust_likelihood_monty##2#dust_likelihood_monty##3"{DustUnfilter{var"##OdinModel#278", @NamedTuple{cases::Float64}}, MontyPacker}(DustUnfilter{var"##OdinModel#278", @NamedTuple{cases::Float64}}(DustSystemGenerator{var"##OdinModel#278"}(var"##OdinModel#278"(3, [:S, :I, :R], [:N, :I0, :beta, :gamma], true, false, true, false, false, Dict{Symbol, Array}())), FilterData{@NamedTuple{cases::Float64}}([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0  …  41.0, 42.0, 43.0, 44.0, 45.0, 46.0, 47.0, 48.0, 49.0, 50.0], [(cases = 14.0,), (cases = 24.0,), (cases = 27.0,), (cases = 54.0,), (cases = 69.0,), (cases = 112.0,), (cases = 123.0,), (cases = 175.0,), (cases = 252.0,), (cases = 302.0,)  …  (cases = 74.0,), (cases = 51.0,), (cases = 47.0,), (cases = 52.0,), (cases = 47.0,), (cases = 36.0,), (cases = 23.0,), (cases = 36.0,), (cases = 29.0,), (cases = 28.0,)]), 0.0, DustODEControl(1.0e-8, 1.0e-8, 10000, :dp5), [0.0, 0.0, 0.0], Xoshiro(0xcf5a312a7b0dd4ca, 0xccd8c80273c5fe6c, 0xafac7c30d8d5cf73, 0x40d17d77842a984e, 0x69fd646aafb7076f), nothing, nothing, nothing, [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0  …  41.0, 42.0, 43.0, 44.0, 45.0, 46.0, 47.0, 48.0, 49.0, 50.0]), MontyPacker([:beta, :gamma], [:beta, :gamma], Symbol[], Dict{Symbol, Tuple}(), Dict{Symbol, UnitRange{Int64}}(:beta => 1:1, :gamma => 2:2), 2, (I0 = 10.0, N = 1000.0), nothing))), nothing, nothing, Odin.MontyModelProperties(true, false, false, false)), MontyModel{var"#11#12", var"#13#14"{var"#11#12"}, var"#15#16", Matrix{Float64}}(["beta", "gamma"], var"#11#12"(), var"#13#14"{var"#11#12"}(var"#11#12"()), var"#15#16"(), [0.0 Inf; 0.0 Inf], Odin.MontyModelProperties(true, true, false, false))), nothing, [0.0 Inf; 0.0 Inf], Odin.MontyModelProperties(true, false, false, false))
+
+``` julia
+sampler_nuts = monty_sampler_nuts(target_acceptance=0.8, n_adaption=500)
+initial_odin = [0.4 0.4; 0.08 0.08]
+
+# Warmup
+_ = monty_sample(posterior_odin, sampler_nuts, 100;
+    n_chains=2, initial=initial_odin, seed=42)
+
+# Timed run
+t_odin_nuts = @timed begin
+    s_odin_nuts = monty_sample(posterior_odin, sampler_nuts, 2000;
+        n_chains=1, initial=reshape([0.4, 0.08], 2, 1), n_burnin=500, seed=123)
+end
+
+b_odin_nuts = vec(s_odin_nuts.pars[1, :, 1])
+g_odin_nuts = vec(s_odin_nuts.pars[2, :, 1])
+
+println("Approach 1: Odin.jl + NUTS")
+println("  Time:     $(round(t_odin_nuts.time; digits=2))s")
+println("  β:        $(round(mean(b_odin_nuts); digits=4)) ± $(round(std(b_odin_nuts); digits=4))")
+println("  γ:        $(round(mean(g_odin_nuts); digits=4)) ± $(round(std(g_odin_nuts); digits=4))")
+println("  ESS/s(β): $(round(ess_ipse(b_odin_nuts)/t_odin_nuts.time; digits=1))")
+println("  iter/s:   $(round(2000/t_odin_nuts.time; digits=0))")
+```
+
+    ┌ Warning: Interrupted. Larger maxiters is needed. If you are using an integrator for non-stiff ODEs or an automatic switching algorithm (the default), you may want to consider using a method for stiff equations. See the solver pages for more details (e.g. https://docs.sciml.ai/DiffEqDocs/stable/solvers/ode_solve/#Stiff-Problems).
+    └ @ SciMLBase ~/.julia/packages/SciMLBase/J3OUh/src/integrator_interface.jl:677
+    ┌ Warning: Interrupted. Larger maxiters is needed. If you are using an integrator for non-stiff ODEs or an automatic switching algorithm (the default), you may want to consider using a method for stiff equations. See the solver pages for more details (e.g. https://docs.sciml.ai/DiffEqDocs/stable/solvers/ode_solve/#Stiff-Problems).
+    └ @ SciMLBase ~/.julia/packages/SciMLBase/J3OUh/src/integrator_interface.jl:677
+    ┌ Warning: Interrupted. Larger maxiters is needed. If you are using an integrator for non-stiff ODEs or an automatic switching algorithm (the default), you may want to consider using a method for stiff equations. See the solver pages for more details (e.g. https://docs.sciml.ai/DiffEqDocs/stable/solvers/ode_solve/#Stiff-Problems).
+    └ @ SciMLBase ~/.julia/packages/SciMLBase/J3OUh/src/integrator_interface.jl:677
+    ┌ Warning: Interrupted. Larger maxiters is needed. If you are using an integrator for non-stiff ODEs or an automatic switching algorithm (the default), you may want to consider using a method for stiff equations. See the solver pages for more details (e.g. https://docs.sciml.ai/DiffEqDocs/stable/solvers/ode_solve/#Stiff-Problems).
+    └ @ SciMLBase ~/.julia/packages/SciMLBase/J3OUh/src/integrator_interface.jl:677
+    ┌ Warning: Interrupted. Larger maxiters is needed. If you are using an integrator for non-stiff ODEs or an automatic switching algorithm (the default), you may want to consider using a method for stiff equations. See the solver pages for more details (e.g. https://docs.sciml.ai/DiffEqDocs/stable/solvers/ode_solve/#Stiff-Problems).
+    └ @ SciMLBase ~/.julia/packages/SciMLBase/J3OUh/src/integrator_interface.jl:677
+    ┌ Warning: Interrupted. Larger maxiters is needed. If you are using an integrator for non-stiff ODEs or an automatic switching algorithm (the default), you may want to consider using a method for stiff equations. See the solver pages for more details (e.g. https://docs.sciml.ai/DiffEqDocs/stable/solvers/ode_solve/#Stiff-Problems).
+    └ @ SciMLBase ~/.julia/packages/SciMLBase/J3OUh/src/integrator_interface.jl:677
+    Approach 1: Odin.jl + NUTS
+      Time:     1.67s
+      β:        0.5051 ± 0.0035
+      γ:        0.1001 ± 0.0009
+      ESS/s(β): 577.2
+      iter/s:   1199.0
+
+## Approach 2: Odin.jl + RW-MCMC
+
+Random walk MCMC requires no gradients and is extremely fast per
+iteration, though with lower per-iteration efficiency.
+
+``` julia
+sampler_rw = monty_sampler_random_walk([0.005 0.0; 0.0 0.001])
+
+# Warmup
+_ = monty_sample(posterior_odin, sampler_rw, 100;
+    n_chains=1, initial=reshape([0.4, 0.08], 2, 1), seed=42)
+
+# Timed run
+t_odin_rw = @timed begin
+    s_odin_rw = monty_sample(posterior_odin, sampler_rw, 5000;
+        n_chains=1, initial=reshape([0.4, 0.08], 2, 1), n_burnin=1000, seed=456)
+end
+
+b_odin_rw = vec(s_odin_rw.pars[1, :, 1])
+g_odin_rw = vec(s_odin_rw.pars[2, :, 1])
+
+println("Approach 2: Odin.jl + RW-MCMC")
+println("  Time:     $(round(t_odin_rw.time; digits=3))s")
+println("  β:        $(round(mean(b_odin_rw); digits=4)) ± $(round(std(b_odin_rw); digits=4))")
+println("  γ:        $(round(mean(g_odin_rw); digits=4)) ± $(round(std(g_odin_rw); digits=4))")
+println("  ESS/s(β): $(round(ess_ipse(b_odin_rw)/t_odin_rw.time; digits=1))")
+println("  iter/s:   $(round(5000/t_odin_rw.time; digits=0))")
+```
+
+    Approach 2: Odin.jl + RW-MCMC
+      Time:     0.115s
+      β:        0.5077 ± 0.0058
+      γ:        0.0999 ± 0.0011
+      ESS/s(β): 84.9
+      iter/s:   43441.0
+
+## Approach 3: Turing.jl + MTK (Baseline)
 
 ``` julia
 sa = InterpolatingAdjoint(autojacvec=EnzymeVJP())
@@ -176,7 +290,7 @@ burnin = 500
 b1 = vec(ch1[:be])[burnin+1:end]
 g1 = vec(ch1[:ge])[burnin+1:end]
 
-println("Approach 1: Turing + adjoint sensealg")
+println("Approach 3: Turing + adjoint sensealg")
 println("  Time:     $(round(t1.time; digits=1))s")
 println("  β:        $(round(mean(b1); digits=4)) ± $(round(std(b1); digits=4))")
 println("  γ:        $(round(mean(g1); digits=4)) ± $(round(std(g1); digits=4))")
@@ -185,15 +299,15 @@ println("  ESS/s(γ): $(round(ess_ipse(g1)/t1.time; digits=1))")
 println("  iter/s:   $(round(2000/t1.time; digits=0))")
 ```
 
-    Approach 1: Turing + adjoint sensealg
-      Time:     211.4s
+    Approach 3: Turing + adjoint sensealg
+      Time:     133.7s
       β:        0.5052 ± 0.0035
-      γ:        0.1 ± 0.001
-      ESS/s(β): 7.0
-      ESS/s(γ): 6.7
-      iter/s:   9.0
+      γ:        0.1001 ± 0.001
+      ESS/s(β): 9.9
+      ESS/s(γ): 11.2
+      iter/s:   15.0
 
-## Approach 2: Symbolic Sensitivity Equations
+## Approach 4: Symbolic Sensitivity Equations
 
 Instead of using AD to differentiate through the ODE solver, we derive
 the **forward sensitivity equations** symbolically. For parameters
@@ -221,25 +335,12 @@ f_rhs = [-β_s * S_s * I_s / N_s,
 J_fy = Symbolics.jacobian(f_rhs, [S_s, I_s, R_s])
 F_fθ = Symbolics.jacobian(f_rhs, [β_s, γ_s])
 
-println("∂f/∂y (Jacobian):")
-display(J_fy)
-println("\n∂f/∂θ:")
-display(F_fθ)
+println("∂f/∂y (Jacobian): $(size(J_fy))")
+println("∂f/∂θ: $(size(F_fθ))")
 ```
 
-    ∂f/∂y (Jacobian):
-
-    ∂f/∂θ:
-
-    3×3 Matrix{Num}:
-     (-I_s(t)*β_s) / N_s       (-S_s(t)*β_s) / N_s  0
-      (I_s(t)*β_s) / N_s  (S_s(t)*β_s) / N_s - γ_s  0
-                       0                       γ_s  0
-
-    3×2 Matrix{Num}:
-     (-S_s(t)*I_s(t)) / N_s        0
-      (S_s(t)*I_s(t)) / N_s  -I_s(t)
-                          0   I_s(t)
+    ∂f/∂y (Jacobian): (3, 3)
+    ∂f/∂θ: (3, 2)
 
 ### Building the Augmented ODE
 
@@ -308,7 +409,7 @@ sol_check = solve(prob_aug, Tsit5(); saveat=data_times, abstol=1e-8, reltol=1e-8
 println("\nI(t=25) = $(round(sol_check[iI, 25]; digits=2)) (expected: $(round(I_true[26]; digits=2)))")
 ```
 
-    Parameter indices: β=1, γ=3, N=2
+    Parameter indices: β=1, γ=2, N=3
     State indices: I=8, s_I_β=5, s_I_γ=2
 
     I(t=25) = 272.53 (expected: 272.53)
@@ -415,7 +516,7 @@ end
 b2 = [exp(chain2[i].z.θ[1]) for i in burnin+1:length(chain2)]
 g2 = [exp(chain2[i].z.θ[2]) for i in burnin+1:length(chain2)]
 
-println("Approach 2: SymSens + ODEFunction codegen + AdvancedHMC")
+println("Approach 4: SymSens + ODEFunction codegen + AdvancedHMC")
 println("  Time:     $(round(t2.time; digits=2))s")
 println("  β:        $(round(mean(b2); digits=4)) ± $(round(std(b2); digits=4))")
 println("  γ:        $(round(mean(g2); digits=4)) ± $(round(std(g2); digits=4))")
@@ -425,14 +526,14 @@ println("  iter/s:   $(round(2000/t2.time; digits=0))")
 ```
 
     [ Info: Found initial step size 0.00625
-    [ Info: Found initial step size 0.00625
-    Approach 2: SymSens + ODEFunction codegen + AdvancedHMC
-      Time:     2.28s
-      β:        0.5053 ± 0.0035
-      γ:        0.1001 ± 0.001
-      ESS/s(β): 597.2
-      ESS/s(γ): 347.0
-      iter/s:   877.0
+    [ Info: Found initial step size 0.0125
+    Approach 4: SymSens + ODEFunction codegen + AdvancedHMC
+      Time:     1.12s
+      β:        0.5052 ± 0.0034
+      γ:        0.1001 ± 0.0009
+      ESS/s(β): 930.5
+      ESS/s(γ): 593.5
+      iter/s:   1782.0
 
 ## Comparison
 
@@ -440,76 +541,70 @@ println("  iter/s:   $(round(2000/t2.time; digits=0))")
 fig = Figure(size=(800, 400))
 
 ax1 = Axis(fig[1, 1]; xlabel="β", ylabel="Density", title="Posterior: β")
-hist!(ax1, b1; bins=40, color=(:steelblue, 0.5), normalization=:pdf, label="Turing ($(round(t1.time; digits=0))s)")
-hist!(ax1, b2; bins=40, color=(:orange, 0.5), normalization=:pdf, label="SymSens ($(round(t2.time; digits=1))s)")
+hist!(ax1, b_odin_nuts; bins=40, color=(:green, 0.4), normalization=:pdf, label="Odin NUTS")
+hist!(ax1, b_odin_rw; bins=40, color=(:purple, 0.3), normalization=:pdf, label="Odin RW")
+hist!(ax1, b1; bins=40, color=(:steelblue, 0.3), normalization=:pdf, label="Turing NUTS")
+hist!(ax1, b2; bins=40, color=(:orange, 0.3), normalization=:pdf, label="SymSens NUTS")
 vlines!(ax1, [0.5]; color=:red, linestyle=:dash, label="Truth")
 axislegend(ax1; position=:rt)
 
 ax2 = Axis(fig[1, 2]; xlabel="γ", ylabel="Density", title="Posterior: γ")
-hist!(ax2, g1; bins=40, color=(:steelblue, 0.5), normalization=:pdf, label="Turing")
-hist!(ax2, g2; bins=40, color=(:orange, 0.5), normalization=:pdf, label="SymSens")
+hist!(ax2, g_odin_nuts; bins=40, color=(:green, 0.4), normalization=:pdf, label="Odin NUTS")
+hist!(ax2, g_odin_rw; bins=40, color=(:purple, 0.3), normalization=:pdf, label="Odin RW")
+hist!(ax2, g1; bins=40, color=(:steelblue, 0.3), normalization=:pdf, label="Turing NUTS")
+hist!(ax2, g2; bins=40, color=(:orange, 0.3), normalization=:pdf, label="SymSens NUTS")
 vlines!(ax2, [0.1]; color=:red, linestyle=:dash, label="Truth")
 axislegend(ax2; position=:rt)
 
 fig
 ```
 
-![Figure 1: Posterior distributions from both approaches](07_fast_inference_files/figure-commonmark/fig-comparison-output-1.png)
+![Figure 1: Posterior distributions from all four approaches
 
+](07_fast_inference_files/figure-commonmark/fig-comparison-output-1.png)
 
 ## Performance Summary
 
-``` julia
-speedup = round(t1.time / t2.time; digits=0)
+| Approach | Sampler | Iters | Time (s) | β (mean ± sd) | γ (mean ± sd) | ESS/s(β) | iter/s |
+|----|----|---:|---:|---:|---:|---:|---:|
+| Odin.jl NUTS | NUTS | 2000 | 1.67 | 0.5051 ± 0.0035 | 0.1001 ± 0.0009 | 577.2 | 1199.0 |
+| Odin.jl RW-MCMC | RW | 5000 | 0.12 | 0.5077 ± 0.0058 | 0.0999 ± 0.0011 | 84.9 | 43441.0 |
+| Turing + MTK NUTS | NUTS | 2000 | 133.67 | 0.5052 ± 0.0035 | 0.1001 ± 0.001 | 9.9 | 15.0 |
+| SymSens + codegen NUTS | NUTS | 2000 | 1.12 | 0.5052 ± 0.0034 | 0.1001 ± 0.0009 | 930.5 | 1782.0 |
 
-println("╔══════════════════════════════════════════════════════════════╗")
-println("║                   Performance Comparison                    ║")
-println("╠══════════════════════════════════════════════════════════════╣")
-println("║ Approach                        │ Time   │ ESS/s(β)│iter/s ║")
-println("╠═════════════════════════════════╪════════╪═════════╪═══════╣")
-println("║ Turing + adjoint sensealg       │$(lpad(round(t1.time;digits=0),5))s │$(lpad(round(ess_ipse(b1)/t1.time;digits=1),7)) │$(lpad(round(2000/t1.time;digits=0),5))  ║")
-println("║ SymSens + codegen + AdvancedHMC │$(lpad(round(t2.time;digits=1),5))s │$(lpad(round(ess_ipse(b2)/t2.time;digits=1),7)) │$(lpad(round(2000/t2.time;digits=0),5))  ║")
-println("╠═════════════════════════════════╪════════╪═════════╪═══════╣")
-println("║ Speedup                         │  $(lpad(speedup,3))×  │         │       ║")
-println("╚══════════════════════════════════════════════════════════════╝")
-```
-
-    ╔══════════════════════════════════════════════════════════════╗
-    ║                   Performance Comparison                    ║
-    ╠══════════════════════════════════════════════════════════════╣
-    ║ Approach                        │ Time   │ ESS/s(β)│iter/s ║
-    ╠═════════════════════════════════╪════════╪═════════╪═══════╣
-    ║ Turing + adjoint sensealg       │211.0s │    7.0 │  9.0  ║
-    ║ SymSens + codegen + AdvancedHMC │  2.3s │  597.2 │877.0  ║
-    ╠═════════════════════════════════╪════════╪═════════╪═══════╣
-    ║ Speedup                         │  93.0×  │         │       ║
-    ╚══════════════════════════════════════════════════════════════╝
+Odin.jl NUTS is **80.0×** faster than Turing + MTK NUTS. SymSens +
+codegen NUTS is **119.0×** faster than Turing + MTK NUTS.
 
 ## Where Does the Speedup Come From?
 
-The ~100× speedup has three main sources:
+The performance differences have several sources:
 
-1.  **No AD at runtime** (~20×): Instead of propagating ForwardDiff dual
-    numbers through the ODE solver, we solve the symbolically-derived
-    sensitivity equations as a single augmented ODE. The gradient is
-    then a simple dot product of `∂ log p / ∂λ` with the sensitivity
-    values `∂λ / ∂θ`.
+1.  **Odin.jl** compiles the DSL directly to a tight Julia ODE function
+    with no symbolic overhead. ForwardDiff through this minimal code
+    path is fast (~0.5ms/iteration for NUTS). RW-MCMC is even faster
+    since it needs no gradient at all.
 
-2.  **ODEFunction codegen** (~500×): MTK’s `ODEFunction(sys)` compiles
-    the symbolic system into a raw Julia function. Using this directly
-    with numeric arrays avoids the symbolic parameter remapping that
-    costs ~100ms per `remake` call in the high-level MTK API.
+2.  **No AD at runtime** (SymSens, ~20×): Instead of propagating
+    ForwardDiff dual numbers through the ODE solver, we solve the
+    symbolically-derived sensitivity equations as a single augmented
+    ODE. The gradient is then a simple dot product of `∂ log p / ∂λ`
+    with the sensitivity values `∂λ / ∂θ`.
 
-3.  **AdvancedHMC directly** (~1.3×): Bypassing Turing’s `@model` macro
+3.  **ODEFunction codegen** (SymSens, ~500×): MTK’s `ODEFunction(sys)`
+    compiles the symbolic system into a raw Julia function. Using this
+    directly with numeric arrays avoids the symbolic parameter remapping
+    that costs ~100ms per `remake` call in the high-level MTK API.
+
+4.  **AdvancedHMC directly** (~1.3×): Bypassing Turing’s `@model` macro
     and VarInfo tracking removes ~25% overhead. The `LogDensityProblems`
     interface gives AdvancedHMC direct access to the log-density and
     gradient.
 
 ### Key Insight
 
-ModelingToolkit is best used as a **compile-time code generator**, not a
-runtime parameter-passing framework. The symbolic capabilities
-(Jacobians, sensitivity equations) are extremely powerful, but the
-high-level API adds overhead that dominates for fast-evaluating models.
-Extract the compiled functions and work with raw arrays for maximum
-performance.
+For fast-evaluating models like SIR, **framework overhead dominates
+compute time**. Odin.jl eliminates this by design — the DSL compiles to
+plain Julia with no symbolic layer at runtime. For MTK users, the key is
+to use `ODEFunction(sys)` to extract compiled functions and work with
+raw arrays, rather than using the high-level API at every MCMC
+iteration.
